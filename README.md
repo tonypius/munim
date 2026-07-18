@@ -84,6 +84,16 @@ munim web                    # or do all of it in a local browser page
 
 By month three, expect the review queue to be near-empty except for genuinely new merchants.
 
+Stage 5 (the fallback classifier for merchants outside your memory and the
+community dictionary) needs scikit-learn, which is an optional extra:
+
+```bash
+pip install 'munim[ml]'      # note the quotes — zsh treats [] as a glob
+```
+
+Without it, unmatched merchants simply fall through to the review queue
+unlabeled; the rest of the pipeline is unaffected.
+
 ## What Munim deliberately is NOT
 
 - **Not a budgeting app.** It classifies; your spreadsheet/Firefly/Actual does the budgeting. `munim export` gives you clean categorized CSV.
