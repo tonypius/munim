@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Munim — ledger</title>
+<style>
+/* Bahi-khata: ink on ruled ledger paper. System fonts only — this page
+   must work fully offline. Amounts use tabular numerals like a ruled
+   cash book; debits in ledger red, credits in ink green. */
+:root{
+  --paper:#FBF9F4; --paper-deep:#F3EFE6; --ink:#1F1B16; --ink-soft:#6B6257;
+  --rule:#D8D2C4; --rule-strong:#B9B09D;
+  --ledger-red:#9E3B34; --ink-green:#2E5E4E; --pen-blue:#2B4B7E;
+  --serif:Georgia,'Times New Roman',serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0}
+body{
+  background:var(--paper);color:var(--ink);font:16px/1.55 var(--serif);
+  min-height:100vh;
+  /* the signature: a red margin rule down the left, like ruled ledger paper */
+  background-image:linear-gradient(90deg,transparent 56px,var(--ledger-red) 56px,var(--ledger-red) 58px,transparent 58px);
+  background-repeat:no-repeat;background-attachment:fixed;
+}
+main{max-width:1080px;margin:0 auto;padding:28px 24px 80px 84px}
+header{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;
+  border-bottom:3px double var(--rule-strong);padding-bottom:14px}
+h1{font-size:34px;font-weight:normal;letter-spacing:.5px}
+h1 .dev{color:var(--ledger-red)}
+#meta{color:var(--ink-soft);font-size:14px}
+#meta b{color:var(--ink);font-family:var(--mono);font-weight:600}
+nav{display:flex;gap:4px;margin:20px 0 26px;flex-wrap:wrap}
+nav button{
+  font:15px var(--serif);background:var(--paper-deep);color:var(--ink-soft);
+  border:1px solid var(--rule);border-bottom:none;padding:8px 18px 7px;
+  border-radius:6px 6px 0 0;cursor:pointer}
+nav button[aria-selected=true]{background:var(--paper);color:var(--ink);
+  border-color:var(--rule-strong);box-shadow:0 2px 0 var(--paper);
+  font-style:italic}
+nav button:focus-visible{outline:2px solid var(--pen-blue);outline-offset:2px}
+nav{border-bottom:1px solid var(--rule-strong)}
+section{display:none}section.active{display:block}
+h2{font-weight:normal;font-size:20px;font-style:italic;margin-bottom:6px}
+.note{color:var(--ink-soft);font-size:14px;margin-bottom:16px;max-width:70ch}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th{font:600 12px var(--mono);text-transform:uppercase;letter-spacing:.8px;
+  color:var(--ink-soft);text-align:left;padding:6px 10px 5px;
+  border-bottom:3px double var(--rule-strong)}
+td{padding:7px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+tr:hover td{background:var(--paper-deep)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.debit{color:var(--ledger-red)}.credit{color:var(--ink-green)}
+.merchant{font-family:var(--mono);font-size:13.5px}
+.tag{font:11px var(--mono);border:1px solid var(--rule-strong);
+  border-radius:3px;padding:1px 6px;color:var(--ink-soft);white-space:nowrap}
+.tag.confirmed{color:var(--ink-green);border-color:var(--ink-green)}
+.tag.person{color:var(--pen-blue);border-color:var(--pen-blue)}
+.raw{color:var(--ink-soft);font:12px var(--mono);word-break:break-all}
+.controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+input,select{font:14px var(--mono);background:#fff;color:var(--ink);
+  border:1px solid var(--rule-strong);border-radius:4px;padding:6px 9px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--pen-blue);outline-offset:1px}
+.confirm{font:13px var(--serif);background:var(--ink-green);color:#fff;
+  border:none;border-radius:4px;padding:6px 13px;cursor:pointer}
+.confirm:hover{filter:brightness(1.12)}
+.empty{padding:34px 10px;color:var(--ink-soft);font-style:italic}
+.bar{background:var(--rule);height:9px;border-radius:2px;overflow:hidden;min-width:120px}
+.bar i{display:block;height:100%;background:var(--ledger-red)}
+/* month columns: ruled like ledger entries, red like debit ink */
+.roots{display:flex;gap:0;margin:14px 0 4px;border-top:1px solid var(--rule);
+  border-bottom:3px double var(--rule-strong);flex-wrap:wrap}
+.root{flex:1;min-width:110px;padding:9px 12px 8px;border-right:1px solid var(--rule)}
+.root:last-child{border-right:none}
+.rootl{font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.8px;color:var(--ink-soft)}
+.rootv{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;margin-top:2px}
+.chart{display:flex;gap:8px;align-items:flex-end;height:170px;margin-top:18px;
+  border-bottom:3px double var(--rule-strong);padding:0 4px;overflow-x:auto}
+.col{flex:1;min-width:34px;max-width:80px;display:flex;flex-direction:column;height:100%}
+.colv{flex:1;display:flex;align-items:flex-end}
+.colv i{display:block;width:100%;background:var(--ledger-red);opacity:.85;border-radius:2px 2px 0 0;min-height:2px}
+.col:hover .colv i{opacity:1}
+.coll{font:11px var(--mono);color:var(--ink-soft);text-align:center;padding-top:5px;white-space:nowrap}
+footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
+  color:var(--ink-soft);font-size:12.5px;font-style:italic}
+@media (max-width:700px){
+  body{background-image:none}main{padding:20px 12px 60px}
+  .raw{display:none}th:last-child,td:last-child{display:none}
+}
+@media (prefers-reduced-motion:no-preference){
+  section.active{animation:settle .18s ease-out}
+  @keyframes settle{from{opacity:.4}to{opacity:1}}
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1><span class="dev">मुनीम</span> munim</h1>
+  <div id="meta">loading the ledger…</div>
+</header>
+
+<nav role="tablist" id="tabs">
+  <button data-tab="review" aria-selected="true">Review <span id="queueN"></span></button>
+  <button data-tab="dashboard">Dashboard</button>
+  <button data-tab="transactions">Transactions</button>
+  <button data-tab="accounts">Accounts</button>
+  <button data-tab="categories">Categories</button>
+  <button data-tab="rules">Rules</button>
+  <button data-tab="contribute">Contribute</button>
+</nav>
+
+<section id="dashboard">
+  <h2>The month's reckoning</h2>
+  <div class="controls">
+    <select id="dMonth"><option value="">All months</option></select>
+    <select id="dAccount"><option value="">All accounts</option></select>
+  </div>
+  <div id="dashRoots" class="roots"></div>
+  <div id="dashStats" class="note"></div>
+  <div id="dashMonths"></div>
+  <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:26px">
+    <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Heads of account</h2><div id="dashCats"></div></div>
+    <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Where the money goes</h2><div id="dashMerchants"></div></div>
+  </div>
+</section>
+
+<section id="accounts">
+  <h2>The books</h2>
+  <p class="note">One row per imported account. Missing months mean missing
+  statements — and missing statements mean transfers get miscounted as
+  spending. <code>munim doctor</code> checks the same thing.</p>
+  <div id="acctBody"></div>
+</section>
+
+<section id="review" class="active">
+  <h2>Waiting for your pen</h2>
+  <p class="note">Confirm a merchant once and every identical entry across the
+  ledger is written up with it. People (blue) are only ever categorized by you.</p>
+  <div id="reviewBody"></div>
+</section>
+
+<section id="transactions">
+  <h2>The ledger</h2>
+  <div class="controls">
+    <select id="fMonth"><option value="">All months</option></select>
+    <input id="fSearch" placeholder="Search merchant, category, raw text" size="34">
+  </div>
+  <div id="txnBody"></div>
+</section>
+
+<section id="categories">
+  <h2>Heads of account</h2>
+  <p class="note">Spending only — transfers and credits are kept out of these
+  totals. Rename or add heads with <code>munim categories</code>.</p>
+  <div id="catBody"></div>
+</section>
+
+<section id="rules">
+  <h2>Rules of the house</h2>
+  <p class="note"><b>Learned</b> rules are yours — written the moment you
+  confirm an entry, and they outrank everything. The <b>community dictionary</b>
+  ships with Munim and covers the merchants everyone shares.</p>
+  <div id="rulesBody"></div>
+</section>
+
+<section id="contribute">
+  <h2>Give back a page</h2>
+  <p class="note">Merchants you've taught Munim that the community dictionary
+  doesn't know yet. Patterns only — never people, amounts, dates, or accounts.
+  Run <code>munim contribute</code> to generate the PR-ready file.</p>
+  <div id="contribBody"></div>
+</section>
+
+<footer>Local only · 127.0.0.1 · Your ledger never leaves this machine.
+These pages read the SQLite data contract; apps should too — not these URLs.</footer>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=(n,c)=>`${c==="INR"?"₹":c+" "}${Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+let CATS=[],CUR="INR";
+
+async function api(p,opt){const r=await fetch(p,opt);if(!r.ok)throw new Error(await r.text());return r.json()}
+
+/* tabs */
+$("#tabs").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));
+  document.querySelectorAll("section").forEach(s=>s.classList.toggle("active",s.id===b.dataset.tab));
+  load(b.dataset.tab);
+});
+
+function amountCell(r){
+  return `<td class="num ${r.direction==="debit"?"debit":"credit"}">${r.direction==="debit"?"−":"+"}${fmt(r.amount,r.currency)}</td>`;
+}
+function statusTag(r){
+  if(r.is_person&&!r.category)return `<span class="tag person">person</span>`;
+  if(r.status==="confirmed")return `<span class="tag confirmed">confirmed</span>`;
+  if(!r.category)return `<span class="tag">new</span>`;
+  return `<span class="tag">${esc(r.stage)} ${Math.round(r.confidence*100)}%</span>`;
+}
+
+/* overview header */
+async function overview(){
+  const o=await api("/api/overview");CUR=o.currency;
+  $("#meta").innerHTML=`<b>${o.total}</b> entries · <b>${o.queue}</b> awaiting review · <b>${o.memory_rules}</b> learned rules · region <b>${esc(o.region)}</b>`;
+  $("#queueN").textContent=o.queue?`(${o.queue})`:"";
+}
+
+/* review */
+async function review(){
+  const {rows}=await api("/api/queue");
+  if(!rows.length){$("#reviewBody").innerHTML=`<p class="empty">Queue is empty — the munim rests.</p>`;return}
+  const opts=cat=>CATS.map(c=>`<option ${c===cat?"selected":""}>${esc(c)}</option>`).join("");
+  $("#reviewBody").innerHTML=`<table><thead><tr>
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Suggested</th><th>Head</th><th></th>
+  </tr></thead><tbody>`+rows.map(r=>`<tr data-id="${r.id}">
+    <td class="num">${r.date}</td>
+    <td><div class="merchant">${esc(r.merchant)||"—"} ${statusTag(r)}</div><div class="raw">${esc(r.raw)}</div></td>
+    ${amountCell(r)}
+    <td>${r.category?esc(r.category):'<span class="tag">no suggestion</span>'}</td>
+    <td><select>${opts(r.category)}</select></td>
+    <td><button class="confirm">Confirm</button></td>
+  </tr>`).join("")+`</tbody></table>`;
+}
+/* Confirm handling: ONE delegated listener on the stable container,
+   attached at startup. (v0.1.1 fix: the old listener used the self-removing 'once'
+   option, so only the first confirm worked. Never again.) */
+$("#reviewBody").addEventListener("click",async e=>{
+  const b=e.target.closest(".confirm");if(!b||b.disabled)return;
+  const tr=b.closest("tr");b.disabled=true;b.textContent="…";
+  try{
+    const res=await api("/api/confirm",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:tr.dataset.id,category:tr.querySelector("select").value})});
+    b.textContent=res.propagated?`✓ +${res.propagated} more`:"✓ written";
+    setTimeout(()=>{
+      tr.remove();overview();
+      if(res.propagated)review();               // others may have resolved too
+      else if(!$("#reviewBody tbody tr"))review(); // show the empty state
+    },500);
+  }catch(err){
+    b.disabled=false;b.textContent="Retry";
+    b.title="Confirm failed: "+err.message;
+  }
+});
+
+/* transactions */
+async function transactions(){
+  const month=$("#fMonth").value,q=$("#fSearch").value;
+  const d=await api(`/api/transactions?month=${month}&q=${encodeURIComponent(q)}`);
+  if($("#fMonth").options.length===1)
+    d.months.forEach(m=>$("#fMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
+  $("#txnBody").innerHTML=d.rows.length?`<table><thead><tr>
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Head</th><th>Provenance</th><th>Account</th>
+  </tr></thead><tbody>`+d.rows.map(r=>`<tr>
+    <td class="num">${r.date}</td>
+    <td><div class="merchant">${esc(r.merchant)||"—"}${r.transfer?' <span class="tag">transfer</span>':""}${r.recurring?' <span class="tag">recurring</span>':""}</div><div class="raw">${esc(r.raw)}</div></td>
+    ${amountCell(r)}
+    <td>${esc(r.category)||'<span class="tag">—</span>'}</td>
+    <td>${statusTag(r)}</td>
+    <td class="merchant">${esc(r.account)}</td>
+  </tr>`).join("")+`</tbody></table>`
+  :`<p class="empty">No entries match.</p>`;
+}
+$("#fMonth")?.addEventListener("change",transactions);
+let deb;$("#fSearch")?.addEventListener("input",()=>{clearTimeout(deb);deb=setTimeout(transactions,250)});
+
+/* categories */
+async function categories(){
+  const d=await api("/api/categories");CATS=d.categories;
+  const rows=Object.entries(d.usage).sort((a,b)=>b[1].total-a[1].total);
+  const max=Math.max(1,...rows.map(([,u])=>u.total));
+  $("#catBody").innerHTML=`<table><thead><tr>
+    <th>Head</th><th>Ledger path</th><th class="num">Entries</th><th class="num">Total</th><th style="width:24%"></th>
+  </tr></thead><tbody>`+rows.map(([c,u])=>`<tr>
+    <td>${esc(c)}${d.categories.includes(c)?"":' <span class="tag">not in taxonomy</span>'}</td>
+    <td class="merchant" style="font-size:12px;color:var(--ink-soft)">${esc(d.paths?.[c]||"")}</td>
+    <td class="num">${u.n}</td>
+    <td class="num">${fmt(u.total,CUR)}</td>
+    <td><div class="bar"><i style="width:${(100*u.total/max).toFixed(1)}%"></i></div></td>
+  </tr>`).join("")+`</tbody></table>`;
+}
+
+/* rules */
+async function rules(){
+  const d=await api("/api/rules");
+  const learned=d.learned.length?`<table><thead><tr>
+    <th>Pattern</th><th>Kind</th><th>Head</th><th>Learned</th>
+  </tr></thead><tbody>`+d.learned.map(r=>`<tr>
+    <td class="merchant">${esc(r.pattern)}</td>
+    <td>${r.kind==="payee"?'<span class="tag person">person</span>':'<span class="tag">merchant</span>'}</td>
+    <td>${esc(r.category)}</td><td class="num">${esc(r.created_at).slice(0,10)}</td>
+  </tr>`).join("")+`</tbody></table>`
+  :`<p class="empty">Nothing learned yet — confirm entries in Review.</p>`;
+  $("#rulesBody").innerHTML=`<h2 style="font-size:16px">Learned (${d.learned.length})</h2>${learned}
+  <h2 style="font-size:16px;margin-top:26px">Community dictionary (${d.dictionary.length})</h2>
+  <table><thead><tr><th>Pattern</th><th>Head</th></tr></thead><tbody>`+
+  d.dictionary.map(r=>`<tr><td class="merchant">${esc(r.pattern)}</td><td>${esc(r.category)}</td></tr>`).join("")+
+  `</tbody></table>`;
+}
+
+/* contribute */
+async function contribute(){
+  const d=await api("/api/contribute");
+  const cats=Object.keys(d.candidates);
+  $("#contribBody").innerHTML=cats.length?`<table><thead><tr>
+    <th>Head</th><th>Patterns ready to share</th>
+  </tr></thead><tbody>`+cats.map(c=>`<tr>
+    <td>${esc(c)}</td><td class="merchant">${d.candidates[c].map(esc).join("<br>")}</td>
+  </tr>`).join("")+`</tbody></table>
+  <p class="note" style="margin-top:12px">${d.skipped} of your rules were held back
+  (already in the dictionary, or too short/generic to share safely).</p>`
+  :`<p class="empty">Nothing new to contribute — everything you've taught Munim is already in the community dictionary.</p>`;
+}
+
+/* dashboard */
+async function dashboard(){
+  const month=$("#dMonth").value,account=$("#dAccount").value;
+  const d=await api(`/api/dashboard?month=${month}&account=${encodeURIComponent(account)}`);
+  if($("#dMonth").options.length===1)
+    d.filter_months.forEach(m=>$("#dMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
+  if($("#dAccount").options.length===1)
+    d.filter_accounts.forEach(a=>$("#dAccount").insertAdjacentHTML("beforeend",`<option>${esc(a)}</option>`));
+  const R=d.roots;
+  $("#dashRoots").innerHTML=["Income","Expenses","Assets","Liabilities","Equity"].map(r=>
+    `<div class="root"><div class="rootl">${r}</div>
+     <div class="rootv ${r==="Income"?"credit":r==="Expenses"?"debit":""}">${fmt(R[r],CUR)}</div></div>`
+  ).join("")+`<div class="root"><div class="rootl">Net (In − Ex)</div>
+     <div class="rootv ${d.net>=0?"credit":"debit"}">${fmt(d.net,CUR)}</div></div>`;
+  if(!d.months.length){$("#dashStats").textContent="No spending matches these filters.";
+    $("#dashMonths").innerHTML="";$("#dashCats").innerHTML="";$("#dashMerchants").innerHTML="";return}
+  $("#dashStats").innerHTML=`Spend <b>${fmt(d.total,CUR)}</b> ·
+    average month <b>${fmt(d.avg_month,CUR)}</b> ·
+    recurring commitments <b>${Math.round(d.recurring_share*100)}%</b> of spend`;
+  const max=Math.max(...d.months.map(m=>m.total));
+  $("#dashMonths").innerHTML=`<div class="chart">`+d.months.map(m=>
+    `<div class="col" title="${m.month}: ${fmt(m.total,CUR)}">
+       <div class="colv"><i style="height:${(100*m.total/max).toFixed(1)}%"></i></div>
+       <div class="coll">${m.month.slice(2)}</div>
+     </div>`).join("")+`</div>`;
+  const hbar=(rows,maxv)=>`<table><tbody>`+rows.map(r=>`<tr>
+    <td style="width:42%">${esc(r.name)}</td>
+    <td class="num" style="width:22%">${fmt(r.total,CUR)}</td>
+    <td><div class="bar"><i style="width:${(100*r.total/maxv).toFixed(1)}%"></i></div></td>
+  </tr>`).join("")+`</tbody></table>`;
+  $("#dashCats").innerHTML=hbar(d.top_categories,d.top_categories[0]?.total||1);
+  $("#dashMerchants").innerHTML=hbar(d.top_merchants,d.top_merchants[0]?.total||1);
+}
+$("#dMonth").addEventListener("change",dashboard);
+$("#dAccount").addEventListener("change",dashboard);
+
+/* accounts */
+async function accounts(){
+  const {rows}=await api("/api/accounts");
+  $("#acctBody").innerHTML=rows.length?`<table><thead><tr>
+    <th>Account</th><th>Type</th><th class="num">Entries</th><th>Coverage</th>
+    <th class="num">Spend</th><th class="num">Credits</th><th class="num">Transfers</th><th>Gaps</th>
+  </tr></thead><tbody>`+rows.map(r=>`<tr>
+    <td class="merchant">${esc(r.account)}</td>
+    <td><span class="tag ${r.type==="Liabilities"?"person":""}">${r.type}</span></td>
+    <td class="num">${r.n}</td>
+    <td class="num">${r.first} → ${r.last} (${r.months} mo)</td>
+    <td class="num debit">${fmt(r.debit,CUR)}</td>
+    <td class="num credit">${fmt(r.credit,CUR)}</td>
+    <td class="num">${r.transfers}</td>
+    <td>${r.missing_months.length?`<span class="tag" style="color:var(--ledger-red);border-color:var(--ledger-red)">${r.missing_months.join(", ")}</span>`:'<span class="tag confirmed">complete</span>'}</td>
+  </tr>`).join("")+`</tbody></table>`
+  :`<p class="empty">No accounts yet — import a statement.</p>`;
+}
+
+const load=t=>({review,dashboard,transactions,accounts,categories,rules,contribute}[t]||(()=>{}))();
+(async()=>{await categories();await overview();review()})();
+</script>
+</body>
+</html>

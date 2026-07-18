@@ -1,0 +1,33 @@
+# Region pack: India
+# UPI, IMPS/NEFT/RTGS, card POS, wallet prefixes.
+# Rules are ordered — first extract match wins. Contribute improvements via PR.
+#
+# Note on P2P: person-vs-merchant is deliberately NOT decided by regex here.
+# A VPA like RAMESH KUMAR@okhdfc and ZOMATO LTD@paytm look identical
+# structurally. The pipeline routes to payee-memory only when the extracted
+# string misses every merchant source AND looks like a person's name.
+
+payee:
+  # Only explicit P2P markers are trusted at regex level
+  - pattern: 'UPI[-/]P2[PM][-/]([A-Z][A-Z ]{2,40})'
+
+extract:
+  - pattern: 'UPI[-/]([A-Z0-9 .&*_-]+?)(?:@[\w.-]+)'
+    rail: upi
+    note: "UPI VPA: UPI-SWIGGY8102@okaxis -> SWIGGY8102"
+  - pattern: '^(?:POS|PCD|ECOM)[\s*/-]+(?:\d+[\s*/-]+)?(.+?)(?:\s+(?:IN|IND)\b.*)?$'
+    rail: card
+    note: "Card POS: POS 512967 SWIGGY BANGALORE IN"
+  - pattern: '^(?:PAYTM|PYTM|BHIM|PHONEPE|GPAY|AMZNPAY)[\s*/-]+(.+)$'
+    rail: wallet
+  - pattern: '^(?:NEFT|IMPS|RTGS|ACH)[\s*/-]+(.+)$'
+    rail: bank_transfer
+
+strip:
+  - pattern: '\b\d{6,}\b'            # long numeric reference numbers
+  - pattern: '\b[A-Z]\d{8,}\b'       # alphanumeric refs: N156261234567890
+  - pattern: '@[\w.-]+'              # residual VPA domains
+  - pattern: '\b(?:PVT|LTD|LIMITED|PRIVATE|INDIA|PAYMENTS?|TECHNOLOGIES|MARKETPLACE|COLLECTION)\b'
+  - pattern: '\b(?:BLR|BANGALORE|BENGALURU|MUM|MUMBAI|DEL|DELHI|HYD|CHN|PUN|KOL|IN|IND)\s*$'
+  - pattern: '\b(?:ST|STORE|TERMINAL|TXN|REF|NO)\s*\d*\b'
+  - pattern: '[*#]+'

@@ -1,0 +1,173 @@
+# Community merchant dictionary — India
+# Format: Category -> list of normalized merchant patterns (uppercase).
+# Contribution rules (see CONTRIBUTING.md):
+#   - patterns only; never amounts, dates, or personal data
+#   - a pattern must be a real merchant identifier, >= 4 characters
+#   - one merchant per line; keep categories from the default taxonomy
+
+Groceries:
+  - BLINKIT
+  - ZEPTO
+  - BIGBASKET
+  - INSTAMART
+  - DMART
+  - AVENUE SUPERMARTS
+  - RELIANCE FRESH
+  - RELIANCE SMART
+  - MORE RETAIL
+  - NATURES BASKET
+  - LICIOUS
+  - COUNTRY DELIGHT
+  - MILKBASKET
+
+Dining:
+  - SWIGGY
+  - ZOMATO
+  - EATSURE
+  - DOMINOS
+  - MCDONALDS
+  - KFC
+  - BURGER KING
+  - PIZZA HUT
+  - CAFE COFFEE DAY
+  - STARBUCKS
+  - THIRD WAVE COFFEE
+  - CHAAYOS
+  - BARBEQUE NATION
+  - HALDIRAMS
+
+Transport:
+  - UBER
+  - OLA CABS
+  - OLACABS
+  - RAPIDO
+  - NAMMA METRO
+  - BMTC
+  - BMRCL
+  - FASTAG
+  - PARKPLUS
+  - YULU
+  - BOUNCE
+  - REDBUS
+  - IRCTC
+
+Shopping:
+  - FLIPKART
+  - MYNTRA
+  - AJIO
+  - NYKAA
+  - MEESHO
+  - SNAPDEAL
+  - TATA CLIQ
+  - CROMA
+  - RELIANCE DIGITAL
+  - DECATHLON
+  - IKEA
+  - LIFESTYLE
+  - WESTSIDE
+  - ZUDIO
+
+Subscriptions:
+  - NETFLIX
+  - HOTSTAR
+  - JIOHOTSTAR
+  - SONYLIV
+  - ZEE5
+  - SPOTIFY
+  - YOUTUBE PREMIUM
+  - GOOGLE ONE
+  - APPLE.COM/BILL
+  - APPLE SERVICES
+  - AMAZON PRIME
+  - AUDIBLE
+  - TIMES PRIME
+
+Utilities:
+  - AIRTEL
+  - JIO RECHARGE
+  - RELIANCE JIO
+  - VI RECHARGE
+  - VODAFONE IDEA
+  - BESCOM
+  - BSES
+  - TATA POWER
+  - ADANI ELECTRICITY
+  - MAHANAGAR GAS
+  - INDANE
+  - HP GAS
+  - BWSSB
+  - ACT FIBERNET
+  - HATHWAY
+  - TATA PLAY
+
+Health:
+  - APOLLO PHARMACY
+  - APOLLO 247
+  - PHARMEASY
+  - NETMEDS
+  - TATA 1MG
+  - MEDPLUS
+  - PRACTO
+  - CULT FIT
+  - CULTFIT
+  - HEALTHIFYME
+
+Entertainment:
+  - BOOKMYSHOW
+  - PVR
+  - INOX
+  - CINEPOLIS
+  - WONDERLA
+  - STEAM PURCHASE
+  - PLAYSTATION
+
+Travel:
+  - MAKEMYTRIP
+  - GOIBIBO
+  - CLEARTRIP
+  - YATRA
+  - IXIGO
+  - INDIGO
+  - 6E
+  - AIR INDIA
+  - VISTARA
+  - AKASA AIR
+  - OYO
+  - TREEBO
+  - AIRBNB
+  - AGODA
+  - BOOKING.COM
+
+Education:
+  - BYJUS
+  - UNACADEMY
+  - UPGRAD
+  - COURSERA
+  - UDEMY
+
+Fees & Charges:
+  - ANNUAL FEE
+  - SMS CHARGES
+  - AMC CHARGES
+  - GST DEBIT
+
+Investments:
+  - ZERODHA
+  - GROWW
+  - UPSTOX
+  - KUVERA
+  - INDIAN CLEARING CORP
+  - BSE LIMITED
+  - NSE CLEARING
+  - CAMS
+  - KFINTECH
+  - LIC PREMIUM
+
+Fuel:
+  - HPCL
+  - IOCL
+  - BPCL
+  - INDIAN OIL
+  - BHARAT PETROLEUM
+  - HINDUSTAN PETROLEUM
+  - SHELL

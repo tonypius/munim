@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "munim"
+version = "0.1.0"
+description = "Local-first personal transaction classifier that learns from you. Memory over models."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Munim contributors" }]
+keywords = ["personal-finance", "transactions", "classifier", "local-first", "privacy"]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.0",
+  "rapidfuzz>=3.0",
+  "pydantic>=2.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+ml = ["scikit-learn>=1.3"]
+dev = ["pytest>=7.0", "scikit-learn>=1.3"]
+
+[project.scripts]
+munim = "munim.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["munim*"]
+
+[tool.setuptools.package-data]
+munim = ["web/index.html", "normalize/packs/*.yaml", "data/*.yaml", "data/dictionary/*.yaml"]

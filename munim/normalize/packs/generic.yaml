@@ -1,0 +1,6 @@
+# Fallback pack: minimal universal cleaning.
+payee: []
+extract: []
+strip:
+  - pattern: '\b\d{6,}\b'
+  - pattern: '[*#]+'

@@ -1,0 +1,21 @@
+# Default taxonomy. Users can edit via `munim init` config; keep it small —
+# 15-20 categories is the sweet spot between insight and review fatigue.
+categories:
+  - Groceries
+  - Dining
+  - Transport
+  - Fuel
+  - Shopping
+  - Subscriptions
+  - Utilities
+  - Rent
+  - Health
+  - Entertainment
+  - Travel
+  - Education
+  - Fees & Charges
+  - Income
+  - Investments
+  - Transfers
+  - Family & Friends
+  - Other

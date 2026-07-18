@@ -1,0 +1,23 @@
+# Community merchant dictionary — global merchants (loaded for every region)
+Shopping:
+  - AMAZON
+Subscriptions:
+  - AMAZON PRIME
+  - NETFLIX
+  - SPOTIFY
+  - OPENAI
+  - CHATGPT
+  - CLAUDE.AI
+  - ANTHROPIC
+  - GITHUB
+  - GOOGLE STORAGE
+  - ICLOUD
+  - DROPBOX
+  - CANVA
+  - ADOBE
+Dining:
+  - MCDONALDS
+  - STARBUCKS
+  - SUBWAY
+Transport:
+  - UBER

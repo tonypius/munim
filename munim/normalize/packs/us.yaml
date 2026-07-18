@@ -1,0 +1,10 @@
+# Region pack: United States (starter — PRs welcome)
+payee:
+  - pattern: '^(?:ZELLE|VENMO)[\s*/-]+(?:TO|FROM)?\s*([A-Z ]{3,40})'
+extract:
+  - pattern: '^(?:POS|SQ|TST|PY)\s*\*?\s*(.+?)(?:\s+[A-Z]{2}\s*$|$)'
+    rail: card
+strip:
+  - pattern: '\b\d{5,}\b'
+  - pattern: '\b[A-Z]{2}\s*$'     # trailing state code
+  - pattern: '[*#]+'
