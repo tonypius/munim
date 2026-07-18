@@ -51,7 +51,7 @@ def init(region: str = typer.Option("in", help="Region pack: in / us / generic")
     console.print(f"Categories: {', '.join(DEFAULT_CATEGORIES)}")
     console.print("\nNext: [bold]munim import your-statement.csv[/bold]")
     if not SKLEARN_AVAILABLE:
-        console.print("[dim]Tip: pip install 'munim[ml]' enables the fallback "
+        console.print(r"[dim]Tip: pip install 'munim\[ml]' enables the fallback "
                       "classifier for unknown merchants.[/dim]")
 
 
