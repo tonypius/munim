@@ -1,0 +1,9 @@
+bank: sib
+# PLACEHOLDER — verify against a real South Indian Bank statement email's
+# From: address before relying on this. See Task 5's final step.
+from_domains:
+  - sib.co.in
+  - southindianbank.com
+attachment_extensions:
+  - .csv
+  - .pdf

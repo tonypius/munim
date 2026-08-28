@@ -1,0 +1,9 @@
+bank: sbi
+# PLACEHOLDER — verify against a real SBI statement email's From: address
+# before relying on this. See Task 5's final step.
+from_domains:
+  - sbi.co.in
+  - onlinesbi.sbi
+attachment_extensions:
+  - .csv
+  - .pdf

@@ -1,0 +1,9 @@
+bank: hdfc
+# PLACEHOLDER — verify against a real HDFC statement email's From: address
+# before relying on this. See Task 5's final step.
+from_domains:
+  - hdfcbank.net
+  - hdfcbank.com
+attachment_extensions:
+  - .csv
+  - .pdf
