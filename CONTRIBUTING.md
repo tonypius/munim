@@ -23,7 +23,7 @@ Rules:
 Anonymized labeled statements make the benchmark real. To donate:
 take real description strings, replace any personal names/handles with
 fictional ones, keep the structural noise intact (that's the point), and
-add ground-truth categories. Format: see `eval/fixtures/synthetic_in.csv`.
+add ground-truth categories. Format: see `packages/classify/eval/fixtures/synthetic_in.csv`.
 
 ## 3. Region packs and bank profiles
 
