@@ -8,3 +8,4 @@ dist/
 venv/
 *.db
 .munim/
+.claude/worktrees/
