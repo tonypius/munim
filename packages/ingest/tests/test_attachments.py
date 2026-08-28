@@ -59,6 +59,119 @@ def test_save_attachments_creates_out_dir(tmp_path):
     assert saved[0].parent == out_dir
 
 
+def test_save_attachments_disambiguates_same_basename_in_one_call(tmp_path):
+    """Every month's statement is often literally named 'Statement.csv'.
+    Saving several in one call must keep all of them, not silently
+    overwrite — and the returned list must be the real files written so
+    the CLI's count is honest."""
+    out_dir = tmp_path / "out"
+    saved = save_attachments(
+        [
+            ("Statement.csv", b"january"),
+            ("Statement.csv", b"february"),
+            ("Statement.csv", b"march"),
+        ],
+        out_dir,
+    )
+
+    assert len(saved) == 3
+    assert [p.name for p in saved] == [
+        "Statement.csv", "Statement (2).csv", "Statement (3).csv",
+    ]
+    # All three exist on disk with their own original content.
+    assert all(p.exists() for p in saved)
+    assert saved[0].read_bytes() == b"january"
+    assert saved[1].read_bytes() == b"february"
+    assert saved[2].read_bytes() == b"march"
+    assert len(list(out_dir.iterdir())) == 3
+
+
+def test_save_attachments_disambiguates_after_path_traversal_stripping(tmp_path):
+    """Deduplication composes with the path-traversal guard: two different
+    traversal paths that sanitize to the same basename must not clobber
+    each other, and must still land inside out_dir."""
+    out_dir = tmp_path / "out"
+    saved = save_attachments(
+        [("../../a/passwd", b"first"), ("../../../b/passwd", b"second")], out_dir,
+    )
+
+    assert len(saved) == 2
+    assert [p.name for p in saved] == ["passwd", "passwd (2)"]
+    assert all(p.parent == out_dir for p in saved)
+    assert saved[0].read_bytes() == b"first"
+    assert saved[1].read_bytes() == b"second"
+
+
+def test_save_attachments_disambiguates_case_insensitively(tmp_path):
+    """On macOS/Windows 'Statement.csv' and 'STATEMENT.CSV' are the same
+    file, so they must be disambiguated too."""
+    out_dir = tmp_path / "out"
+    saved = save_attachments(
+        [("Statement.csv", b"one"), ("STATEMENT.CSV", b"two")], out_dir,
+    )
+
+    assert len(saved) == 2
+    assert saved[0].name == "Statement.csv"
+    assert saved[1].name == "STATEMENT (2).CSV"
+    assert saved[0].read_bytes() == b"one"
+    assert saved[1].read_bytes() == b"two"
+
+
+def test_save_attachments_extensionless_names_disambiguate(tmp_path):
+    out_dir = tmp_path / "out"
+    saved = save_attachments([("statement", b"a"), ("statement", b"b")], out_dir)
+    assert [p.name for p in saved] == ["statement", "statement (2)"]
+    assert saved[1].read_bytes() == b"b"
+
+
+def test_save_attachments_disambiguates_across_separate_calls(tmp_path):
+    """The CLI calls save_attachments once per message, so a collision
+    between two messages shows up as a collision with a file already on
+    disk — it must be disambiguated too, not overwritten."""
+    out_dir = tmp_path / "out"
+    first = save_attachments([("Statement.csv", b"january")], out_dir)
+    second = save_attachments([("Statement.csv", b"february")], out_dir)
+
+    assert first[0].name == "Statement.csv"
+    assert second[0].name == "Statement (2).csv"
+    assert first[0].read_bytes() == b"january"
+    assert second[0].read_bytes() == b"february"
+
+
+def test_save_attachments_refetching_identical_content_is_idempotent(tmp_path):
+    """Re-running the same fetch must not pile up '(2)', '(3)', ... copies
+    of a file that is already there byte-for-byte."""
+    out_dir = tmp_path / "out"
+    for _ in range(3):
+        saved = save_attachments([("Statement.csv", b"same-bytes")], out_dir)
+        assert [p.name for p in saved] == ["Statement.csv"]
+
+    assert len(list(out_dir.iterdir())) == 1
+    assert (out_dir / "Statement.csv").read_bytes() == b"same-bytes"
+
+
+def test_save_attachments_does_not_overwrite_a_preexisting_different_file(tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "Statement.csv").write_bytes(b"precious existing data")
+
+    saved = save_attachments([("Statement.csv", b"new")], out_dir)
+
+    assert saved[0].name == "Statement (2).csv"
+    assert (out_dir / "Statement.csv").read_bytes() == b"precious existing data"
+
+
+def test_save_attachments_skips_past_a_directory_in_the_way(tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "Statement.csv").mkdir()
+
+    saved = save_attachments([("Statement.csv", b"data")], out_dir)
+
+    assert saved[0].name == "Statement (2).csv"
+    assert saved[0].read_bytes() == b"data"
+
+
 def test_save_attachments_strips_path_traversal_from_filename(tmp_path):
     """A malicious email attachment filename must not be able to write
     outside out_dir — e.g. '../../etc/passwd' must save as 'passwd'
