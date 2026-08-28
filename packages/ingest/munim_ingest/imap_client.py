@@ -4,7 +4,7 @@ only (imaplib) — no OAuth, no external API, just IMAP + an app password.
 from __future__ import annotations
 
 import imaplib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,7 +12,11 @@ class ImapConfig:
     host: str
     port: int
     email: str
-    password: str
+    # repr=False keeps the app password out of the auto-generated __repr__,
+    # so it can never be rendered into a traceback, log line or error
+    # message that happens to include an ImapConfig. It is not a default
+    # value, so it does not affect dataclass field ordering.
+    password: str = field(repr=False)
 
 
 def connect(config: ImapConfig) -> imaplib.IMAP4_SSL:
