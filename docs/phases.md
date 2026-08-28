@@ -31,7 +31,7 @@ identical. No new features, no behavior change — a pure relocation.
 Plan: [superpowers/plans/2026-08-28-monorepo-restructure.md](superpowers/plans/2026-08-28-monorepo-restructure.md)
 
 ## Phase 1 — Ingest: Gmail fetch
-**Status: not started**
+**Status: done**
 
 New `packages/ingest/` package. IMAP + app-password connection to
 Gmail (no OAuth, no Google Cloud project — keeps the "no account, no
@@ -40,7 +40,7 @@ folder. Bank search rules (from-domain, subject keywords) live in a
 pack file, mirroring the existing region-pack pattern in
 [adding-a-bank-adapter.md](adding-a-bank-adapter.md).
 
-Plan: not yet written.
+Plan: [superpowers/plans/2026-08-29-gmail-ingest.md](superpowers/plans/2026-08-29-gmail-ingest.md)
 
 ## Phase 2 — Ingest: PDF extraction (per-bank adapters)
 **Status: not started**
