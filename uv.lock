@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "munim",
+    "munim-ingest",
 ]
 
 [[package]]
@@ -125,6 +126,30 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["ml", "dev"]
+
+[[package]]
+name = "munim-ingest"
+version = "0.1.0"
+source = { editable = "packages/ingest" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "typer", specifier = ">=0.12" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "narwhals"
