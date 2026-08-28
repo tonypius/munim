@@ -68,3 +68,30 @@ def test_save_attachments_strips_path_traversal_from_filename(tmp_path):
     assert saved[0].name == "passwd"
     assert saved[0].parent == out_dir
     assert saved[0] == out_dir / "passwd"
+
+
+def test_save_attachments_skips_dangerous_dotdot_and_dot_filenames(tmp_path):
+    """Edge case: filenames that sanitize to '.' or '..' must be skipped,
+    as they would escape out_dir or overwrite it."""
+    out_dir = tmp_path / "out"
+
+    # Try to save attachments with dangerous sanitized names
+    saved = save_attachments(
+        [
+            ("..", b"dangerous1"),
+            (".", b"dangerous2"),
+            ("foo/..", b"dangerous3"),
+            ("normal.csv", b"safe"),
+        ],
+        out_dir,
+    )
+
+    # Only the normal file should be saved
+    assert len(saved) == 1
+    assert saved[0].name == "normal.csv"
+    assert saved[0].read_bytes() == b"safe"
+
+    # Verify only normal.csv exists in out_dir (no dangerous files)
+    files_in_out_dir = list(out_dir.iterdir())
+    assert len(files_in_out_dir) == 1
+    assert files_in_out_dir[0].name == "normal.csv"

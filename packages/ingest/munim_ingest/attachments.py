@@ -35,6 +35,9 @@ def save_attachments(attachments: list[tuple[str, bytes]], out_dir: Path) -> lis
     saved = []
     for filename, content in attachments:
         safe_name = Path(filename).name
+        # Skip attachments whose filename sanitizes to nothing usable or to ".."
+        if not safe_name or safe_name in (".", ".."):
+            continue
         dest = out_dir / safe_name
         dest.write_bytes(content)
         saved.append(dest)
