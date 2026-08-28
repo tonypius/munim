@@ -22,7 +22,7 @@ the same shape `munim classify` already reads on stdin (see
 the other.
 
 ## Phase 0 — Monorepo restructure (uv workspace)
-**Status: planned**
+**Status: done**
 
 Move the existing classifier into `packages/classify/`, add a uv
 workspace root, keep every existing command/test/eval behavior

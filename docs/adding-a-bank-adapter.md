@@ -25,7 +25,7 @@ currency: "INR"
 ## 2. Region pack rules (regex, tested)
 
 If your bank's strings aren't cleaned well, improve the region pack at
-`munim/normalize/packs/<region>.yaml`. Each rule needs a fixture line in
+`packages/classify/munim/normalize/packs/<region>.yaml`. Each rule needs a fixture line in
 `eval/fixtures/` proving it works — run `make eval` before submitting.
 
 Rule types:

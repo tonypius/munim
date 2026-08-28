@@ -4,7 +4,7 @@ The most valuable contributions, in order:
 
 ## 1. Merchant dictionary patterns (3-line PR)
 
-Add patterns to `munim/data/dictionary/<region>.yaml`:
+Add patterns to `packages/classify/munim/data/dictionary/<region>.yaml`:
 
 ```yaml
 Dining:
@@ -15,7 +15,7 @@ Rules:
 - **Patterns only.** Never amounts, dates, account details, or anything
   from your personal statements.
 - Pattern must be a real merchant identifier, >= 4 characters, uppercase.
-- Use categories from `munim/data/categories.yaml`.
+- Use categories from `packages/classify/munim/data/categories.yaml`.
 - One merchant per line; alphabetical within category preferred.
 
 ## 2. Labeled fixture data (the gold standard)

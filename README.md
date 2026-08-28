@@ -74,13 +74,17 @@ The feedback loops (the actual product):
 ## Quick start
 
 ```bash
-pip install munim            # (or: pip install -e . from this repo)
+uv sync                      # from a checkout of this repo (uv workspace)
 munim init                   # choose region, currency, category set
 munim import statement.csv   # generic CSV wizard maps your columns once
 munim review                 # confirm the unknowns — 2 minutes
 munim report                 # monthly spend by category
 munim web                    # or do all of it in a local browser page
 ```
+
+This repo is a uv workspace — `packages/classify/` is the classifier
+you just installed; see [docs/phases.md](docs/phases.md) for what's
+being added alongside it.
 
 By month three, expect the review queue to be near-empty except for genuinely new merchants.
 
@@ -127,7 +131,7 @@ Bank-string noise is regional. Munim ships **region packs** — pluggable normal
 - `in` — UPI handles, PAYTM*/BHIM prefixes, IFSC noise, NEFT/IMPS/RTGS markers
 - `us` — POS*/SQ*/TST* prefixes, trailing state codes, terminal IDs
 
-and a **community merchant dictionary** (`munim/data/dictionary/`) — versioned, human-reviewed pattern→category mappings. Contributing a pattern for your region is a 3-line PR and improves cold-start for everyone. Patterns only — never amounts, dates, or anything personal. See [CONTRIBUTING.md](CONTRIBUTING.md).
+and a **community merchant dictionary** (`packages/classify/munim/data/dictionary/`) — versioned, human-reviewed pattern→category mappings. Contributing a pattern for your region is a 3-line PR and improves cold-start for everyone. Patterns only — never amounts, dates, or anything personal. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Benchmarks
 
