@@ -1,16 +1,17 @@
 .PHONY: install test eval demo clean
 
 install:
-	pip install -e ".[dev]"
+	uv sync --all-extras
 
 test:
-	python -m pytest tests/ -q
+	uv run --package munim pytest packages/classify/tests -q
 
 eval:
-	python eval/run_eval.py
+	uv run --package munim --directory packages/classify python eval/run_eval.py
 
-demo: ## import the fixture into a throwaway store and show a report
-	MUNIM_DEMO=1 python -c "print('Try: munim init && munim import eval/fixtures/synthetic_in.csv')"
+demo: ## init and import the fixture into your real ~/.munim store, then show a report
+	uv run --package munim munim init && \
+	uv run --package munim munim import packages/classify/eval/fixtures/synthetic_in.csv
 
 clean:
-	rm -rf build dist *.egg-info .pytest_cache
+	rm -rf packages/*/build packages/*/dist packages/*/*.egg-info *.egg-info .pytest_cache .venv

@@ -5,12 +5,12 @@ resolves it wins, and the decision carries provenance (stage + confidence).
 
 | # | Stage | Module | Resolves | Status produced |
 |---|-------|--------|----------|-----------------|
-| 1 | Ingest | `munim/ingest/` | CSV -> canonical `Transaction` | — |
-| 2 | Normalize | `munim/normalize/` | raw string -> merchant candidate / payee handle, via region pack | — |
-| 3 | Structural | `munim/structural/` | transfers, income, recurrence tags | provisional (0.95+) |
-| 4 | Memory | `munim/memory/` | exact -> containment -> fuzzy vs user rules, then community dictionary | user-exact = confirmed; rest provisional |
-| 5 | Fallback | `munim/fallback/` | TF-IDF char n-grams + logistic regression | provisional |
-| 6 | Review | `munim/cli.py review` | the user | **confirmed** |
+| 1 | Ingest | `packages/classify/munim/ingest/` | CSV -> canonical `Transaction` | — |
+| 2 | Normalize | `packages/classify/munim/normalize/` | raw string -> merchant candidate / payee handle, via region pack | — |
+| 3 | Structural | `packages/classify/munim/structural/` | transfers, income, recurrence tags | provisional (0.95+) |
+| 4 | Memory | `packages/classify/munim/memory/` | exact -> containment -> fuzzy vs user rules, then community dictionary | user-exact = confirmed; rest provisional |
+| 5 | Fallback | `packages/classify/munim/fallback/` | TF-IDF char n-grams + logistic regression | provisional |
+| 6 | Review | `packages/classify/munim/cli.py review` | the user | **confirmed** |
 
 ## Precedence rules
 

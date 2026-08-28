@@ -74,13 +74,19 @@ The feedback loops (the actual product):
 ## Quick start
 
 ```bash
-pip install munim            # (or: pip install -e . from this repo)
-munim init                   # choose region, currency, category set
-munim import statement.csv   # generic CSV wizard maps your columns once
-munim review                 # confirm the unknowns — 2 minutes
-munim report                 # monthly spend by category
-munim web                    # or do all of it in a local browser page
+uv sync                          # from a checkout of this repo (uv workspace)
+uv run munim init                # choose region, currency, category set
+uv run munim import statement.csv  # generic CSV wizard maps your columns once
+uv run munim review              # confirm the unknowns — 2 minutes
+uv run munim report              # monthly spend by category
+uv run munim web                 # or do all of it in a local browser page
 ```
+
+`uv run` resolves `munim` inside the workspace's `.venv` without you having
+to activate it — drop the prefix if you've `source .venv/bin/activate`d
+already. This repo is a uv workspace — `packages/classify/` is the
+classifier you just installed; see [docs/phases.md](docs/phases.md) for
+what's being added alongside it.
 
 By month three, expect the review queue to be near-empty except for genuinely new merchants.
 
@@ -88,11 +94,13 @@ Stage 5 (the fallback classifier for merchants outside your memory and the
 community dictionary) needs scikit-learn, which is an optional extra:
 
 ```bash
-pip install 'munim[ml]'      # note the quotes — zsh treats [] as a glob
+uv sync --extra ml
 ```
 
 Without it, unmatched merchants simply fall through to the review queue
-unlabeled; the rest of the pipeline is unaffected.
+unlabeled; the rest of the pipeline is unaffected. Contributing to Munim
+(running tests, `make eval`, etc.) needs the `dev` extra too — `make install`
+runs `uv sync --all-extras` to pull in both at once.
 
 ## What Munim deliberately is NOT
 
@@ -127,11 +135,11 @@ Bank-string noise is regional. Munim ships **region packs** — pluggable normal
 - `in` — UPI handles, PAYTM*/BHIM prefixes, IFSC noise, NEFT/IMPS/RTGS markers
 - `us` — POS*/SQ*/TST* prefixes, trailing state codes, terminal IDs
 
-and a **community merchant dictionary** (`munim/data/dictionary/`) — versioned, human-reviewed pattern→category mappings. Contributing a pattern for your region is a 3-line PR and improves cold-start for everyone. Patterns only — never amounts, dates, or anything personal. See [CONTRIBUTING.md](CONTRIBUTING.md).
+and a **community merchant dictionary** (`packages/classify/munim/data/dictionary/`) — versioned, human-reviewed pattern→category mappings. Contributing a pattern for your region is a 3-line PR and improves cold-start for everyone. Patterns only — never amounts, dates, or anything personal. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Benchmarks
 
-Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [eval/RESULTS.md](eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.
+Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [packages/classify/eval/RESULTS.md](packages/classify/eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.
 
 ## Design docs
 
