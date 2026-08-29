@@ -14,9 +14,18 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
+from .hdfc_credit_card import normalize_hdfc_credit_card_amounts
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
 from .pdf_extract import PdfPasswordError, extract_rows, filter_transaction_rows, open_pdf
+
+# Bank-specific post-filter normalizers, opted into via `pdf extract --bank`.
+# Each is scoped to exactly one bank's known amount/column convention —
+# never applied by default, since it encodes real assumptions about that
+# bank's statement layout that don't generalize to others.
+BANK_NORMALIZERS = {
+    "hdfc": normalize_hdfc_credit_card_amounts,
+}
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
 # this CLI must never render a locals table, which would print the Gmail
@@ -193,6 +202,11 @@ def pdf_extract_cmd(
         help="Skip transaction-row filtering; write every extracted row "
              "as-is. Useful if the automatic filter doesn't fit a bank's "
              "layout, or to inspect what was extracted before cleanup."),
+    bank: str = typer.Option(
+        None, "--bank",
+        help=f"Apply a bank-specific amount normalization after the "
+             f"generic filter (ignored with --raw). Available: "
+             f"{', '.join(BANK_NORMALIZERS)}."),
 ):
     """Decrypt a password-protected statement PDF and extract its rows to a
     CSV file. The password is read from MUNIM_PDF_PASSWORD if set,
@@ -204,9 +218,18 @@ def pdf_extract_cmd(
     default, rows are filtered down to the dominant (most common) row
     shape whose first cell looks like a date, which is what a real
     transaction row looks like; pass --raw to skip this and get everything
-    extracted, unfiltered. Run `munim import` on the output next to map
-    columns and classify, same as any bank CSV export.
+    extracted, unfiltered. --bank hdfc additionally normalizes HDFC credit
+    card statements' amount convention (positive magnitude + a trailing Cr
+    suffix for credits) into munim's expected signed-amount format. Run
+    `munim import` on the output next to map columns and classify, same as
+    any bank CSV export.
     """
+    if bank is not None and bank not in BANK_NORMALIZERS:
+        console.print(
+            f"[red]Unknown --bank '{escape(bank)}'. Available: "
+            f"{', '.join(BANK_NORMALIZERS)}.[/red]")
+        raise typer.Exit(1)
+
     password = os.environ.get("MUNIM_PDF_PASSWORD") or getpass.getpass(
         f"Password for {file.name} (never stored): ")
 
@@ -227,6 +250,11 @@ def pdf_extract_cmd(
 
         if raw:
             final_rows = rows
+            if bank is not None:
+                console.print(
+                    "[yellow]--bank normalization skipped: --raw bypasses "
+                    "all row processing, including bank-specific "
+                    "normalization.[/yellow]")
         else:
             final_rows = filter_transaction_rows(rows)
             if not final_rows:
@@ -242,6 +270,12 @@ def pdf_extract_cmd(
                 f"out {dropped} non-transaction row(s) (headers, summaries, "
                 "blanks). Spot-check the output — pass --raw to see "
                 "everything unfiltered if this looks wrong.")
+            if bank is not None:
+                final_rows = BANK_NORMALIZERS[bank](final_rows)
+                console.print(
+                    f"Applied {escape(bank)} amount normalization "
+                    "(positive-magnitude + Cr/Dr suffix → munim's signed "
+                    "amount convention).")
 
         out_path = out or file.with_suffix(".csv")
         if out_path.exists():

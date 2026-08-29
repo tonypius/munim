@@ -203,3 +203,54 @@ def test_pdf_extract_zero_kept_after_filter_exits_cleanly(tmp_path):
 
     assert result.exit_code == 1
     assert "--raw" in result.output
+
+
+def test_pdf_extract_bank_hdfc_normalizes_amounts(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [
+        ["01/01/2024", "GROCERY STORE", None, "100.00", None],
+        ["02/01/2024", "REFUND", None, "50.00Cr", None],
+    ]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    assert "hdfc amount normalization" in result.output.lower()
+    lines = out_path.read_text().splitlines()
+    assert lines[0].endswith(",-100.00,")
+    assert lines[1].endswith(",50.00,")
+
+
+def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+
+    result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--bank", "not_a_real_bank"])
+
+    assert result.exit_code == 1
+    assert "unknown --bank" in result.output.lower()
+
+
+def test_pdf_extract_bank_ignored_with_raw(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/01/2024", "X", None, "100.00", None]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--raw", "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    assert "skipped" in result.output.lower()
+    # Amount left as the raw "100.00", not normalized to "-100.00".
+    assert out_path.read_text().splitlines()[0].endswith(",100.00,")
