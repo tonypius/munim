@@ -38,7 +38,8 @@ def test_pdf_extract_writes_csv_and_prints_next_step(tmp_path):
          patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
          patch("munim_ingest.cli.extract_rows",
                return_value=[["Date", "Amount"], ["2026-06-01", "100"]]):
-        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--raw"])
 
     assert result.exit_code == 0
     assert out_path.exists()
@@ -54,7 +55,7 @@ def test_pdf_extract_reads_password_from_env_var_first(tmp_path, monkeypatch):
 
     with patch("munim_ingest.cli.getpass.getpass") as mock_getpass, \
          patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()) as mock_open, \
-         patch("munim_ingest.cli.extract_rows", return_value=[["a"]]):
+         patch("munim_ingest.cli.extract_rows", return_value=[["01/01/2024"]]):
         result = runner.invoke(app, ["pdf", "extract", str(pdf_path)])
 
     assert result.exit_code == 0
@@ -80,7 +81,7 @@ def test_pdf_extract_default_output_path_is_pdf_stem_with_csv_suffix(tmp_path):
 
     with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
          patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
-         patch("munim_ingest.cli.extract_rows", return_value=[["a"]]):
+         patch("munim_ingest.cli.extract_rows", return_value=[["01/01/2024"]]):
         result = runner.invoke(app, ["pdf", "extract", str(pdf_path)])
 
     assert result.exit_code == 0
@@ -102,7 +103,7 @@ def test_pdf_extract_write_failure_exits_cleanly_without_leaking_password(tmp_pa
 
     with patch("munim_ingest.cli.getpass.getpass", return_value="hunter2-distinctive-pw"), \
          patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
-         patch("munim_ingest.cli.extract_rows", return_value=[["Date", "Amount"]]):
+         patch("munim_ingest.cli.extract_rows", return_value=[["01/01/2024", "100"]]):
         result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
 
     assert result.exit_code == 1
@@ -127,11 +128,78 @@ def test_pdf_extract_overwrites_existing_output_with_warning(tmp_path):
     with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
          patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
          patch("munim_ingest.cli.extract_rows",
-               return_value=[["Date", "Amount"], ["2026-06-01", "100"]]):
-        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+               return_value=[["Date", "Amount"], ["01/01/2024", "100"]]):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--raw"])
 
     assert result.exit_code == 0
     assert "overwriting" in result.output.lower()
     assert str(out_path) in result.output
     assert out_path.read_text().splitlines()[0] == "Date,Amount"
     assert "stale" not in out_path.read_text()
+
+
+def test_pdf_extract_filters_by_default_and_reports_counts(tmp_path):
+    """Real-world extraction mixes genuine transaction rows with
+    page-header/summary noise pdfplumber also detects as table rows — the
+    default behavior must filter down to transaction-shaped rows and tell
+    the user how many were kept vs dropped."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [
+        ["Statement Title Noise"],  # 1-col header — different shape, dropped
+        ["01/01/2024", "GROCERY STORE", "100.00"],
+        ["02/01/2024", "COFFEE SHOP", "5.50"],
+    ]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "kept 2" in result.output.lower()
+    assert "filtered out 1" in result.output.lower()
+    lines = out_path.read_text().splitlines()
+    assert len(lines) == 2
+    assert "Statement Title Noise" not in out_path.read_text()
+
+
+def test_pdf_extract_raw_flag_skips_filtering(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [
+        ["Statement Title Noise"],
+        ["01/01/2024", "GROCERY STORE", "100.00"],
+    ]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--raw"])
+
+    assert result.exit_code == 0, result.output
+    assert "kept" not in result.output.lower()
+    lines = out_path.read_text().splitlines()
+    assert len(lines) == 2
+    assert "Statement Title Noise" in out_path.read_text()
+
+
+def test_pdf_extract_zero_kept_after_filter_exits_cleanly(tmp_path):
+    """If nothing in the extraction looks like a transaction (e.g. a
+    layout the filter doesn't fit), fail loudly and suggest --raw rather
+    than silently writing an empty CSV."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    raw_rows = [["Statement Title Noise"], ["Another header line"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(app, ["pdf", "extract", str(pdf_path)])
+
+    assert result.exit_code == 1
+    assert "--raw" in result.output

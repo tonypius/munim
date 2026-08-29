@@ -10,9 +10,13 @@ guess made now.
 """
 from __future__ import annotations
 
+import re
+from collections import Counter
 from pathlib import Path
 
 import pdfplumber
+
+_DATE_RE = re.compile(r"\d{2}/\d{2}/\d{4}")
 
 
 class PdfPasswordError(Exception):
@@ -59,3 +63,41 @@ def extract_rows(pdf: pdfplumber.PDF) -> list[list[str | None]]:
             if line.strip():
                 all_lines.append([line])
     return all_lines
+
+
+def filter_transaction_rows(
+    rows: list[list[str | None]],
+) -> list[list[str | None]]:
+    """From extract_rows()'s raw output — which mixes real transaction rows
+    with page-header titles, per-page summary boxes, and blank spacer rows
+    all detected as "tables" by pdfplumber alongside the genuine ledger —
+    keep only the rows that plausibly represent a transaction.
+
+    This is a generic cleanup step, not per-bank column parsing: it never
+    interprets amount or description content, only decides which raw rows
+    to keep. Two conditions, both required:
+      1. The row's length matches the DOMINANT (most common) length across
+         all rows — real transaction tables vastly outnumber the noise
+         rows in any real statement, so the majority shape is a reliable
+         signal for "this is the transaction table," and it also excludes
+         same-shaped-by-coincidence summary rows a date check alone
+         wouldn't catch (e.g. a 3-column "Payment Due Date" row that also
+         starts with a date, but isn't a transaction).
+      2. The first cell contains something that looks like a date
+         (DD/MM/YYYY) ANYWHERE in the cell, not just as a strict prefix —
+         a real extraction artifact observed against an actual statement
+         prepended stray text before the date in one row; anchoring the
+         match at position 0 would have silently dropped that transaction.
+
+    Without this, extract_rows()'s raw output — mixed row lengths — breaks
+    munim import's column-mapping wizard, which applies one fixed column
+    index across every row.
+    """
+    if not rows:
+        return []
+    lengths = Counter(len(r) for r in rows)
+    dominant_length = lengths.most_common(1)[0][0]
+    return [
+        r for r in rows
+        if len(r) == dominant_length and r[0] and _DATE_RE.search(r[0])
+    ]

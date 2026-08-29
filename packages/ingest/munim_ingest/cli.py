@@ -16,7 +16,7 @@ from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
-from .pdf_extract import PdfPasswordError, extract_rows, open_pdf
+from .pdf_extract import PdfPasswordError, extract_rows, filter_transaction_rows, open_pdf
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
 # this CLI must never render a locals table, which would print the Gmail
@@ -188,13 +188,24 @@ def gmail_fetch(
 def pdf_extract_cmd(
     file: Path = typer.Argument(..., exists=True, help="Password-protected statement PDF"),
     out: Path = typer.Option(None, help="Output CSV path (default: <file>.csv next to the source)"),
+    raw: bool = typer.Option(
+        False, "--raw",
+        help="Skip transaction-row filtering; write every extracted row "
+             "as-is. Useful if the automatic filter doesn't fit a bank's "
+             "layout, or to inspect what was extracted before cleanup."),
 ):
     """Decrypt a password-protected statement PDF and extract its rows to a
     CSV file. The password is read from MUNIM_PDF_PASSWORD if set,
     otherwise prompted — never written to disk. Extraction is generic (no
     bank-specific column knowledge): ruled tables where pdfplumber finds
-    them, one row per line of text otherwise. Run `munim import` on the
-    output next to map columns and classify, same as any bank CSV export.
+    them, one row per line of text otherwise. Real bank table extraction
+    often mixes genuine transaction rows with page-header titles and
+    per-page summary boxes pdfplumber also detects as "tables" — by
+    default, rows are filtered down to the dominant (most common) row
+    shape whose first cell looks like a date, which is what a real
+    transaction row looks like; pass --raw to skip this and get everything
+    extracted, unfiltered. Run `munim import` on the output next to map
+    columns and classify, same as any bank CSV export.
     """
     password = os.environ.get("MUNIM_PDF_PASSWORD") or getpass.getpass(
         f"Password for {file.name} (never stored): ")
@@ -214,10 +225,28 @@ def pdf_extract_cmd(
             console.print("[yellow]No text or tables found in this PDF.[/yellow]")
             raise typer.Exit(1)
 
+        if raw:
+            final_rows = rows
+        else:
+            final_rows = filter_transaction_rows(rows)
+            if not final_rows:
+                console.print(
+                    f"[yellow]The transaction filter kept 0 of {len(rows)} "
+                    "extracted row(s) — this PDF's layout may not match "
+                    "what the filter expects. Re-run with --raw to see "
+                    "everything extracted, unfiltered.[/yellow]")
+                raise typer.Exit(1)
+            dropped = len(rows) - len(final_rows)
+            console.print(
+                f"Kept {len(final_rows)} likely transaction row(s), filtered "
+                f"out {dropped} non-transaction row(s) (headers, summaries, "
+                "blanks). Spot-check the output — pass --raw to see "
+                "everything unfiltered if this looks wrong.")
+
         out_path = out or file.with_suffix(".csv")
         if out_path.exists():
             console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
-        write_csv(rows, out_path)
+        write_csv(final_rows, out_path)
     except typer.Exit:
         raise
     except Exception as e:
@@ -227,7 +256,7 @@ def pdf_extract_cmd(
     # /private/var/folders tmp dirs, and plausible for a user's own nested
     # download folders) must not be broken across lines by Rich's default
     # 80-column wrap, which would corrupt the path if copy-pasted.
-    console.print(f"[green]Extracted {len(rows)} row(s) to {escape(str(out_path))}[/green]",
+    console.print(f"[green]Extracted {len(final_rows)} row(s) to {escape(str(out_path))}[/green]",
                   soft_wrap=True)
     console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
                   "to map columns and classify.", soft_wrap=True)
