@@ -85,3 +85,53 @@ def test_pdf_extract_default_output_path_is_pdf_stem_with_csv_suffix(tmp_path):
 
     assert result.exit_code == 0
     assert (tmp_path / "statement.csv").exists()
+
+
+def test_pdf_extract_write_failure_exits_cleanly_without_leaking_password(tmp_path):
+    """Finding 1: write_csv() runs after the try/except in the original
+    code, so a write failure (e.g. --out's parent is a regular file, not a
+    directory) reached an unhandled traceback instead of a clean error —
+    with `password` still a live local in that frame. Reproduce the exact
+    repro: point --out's parent at a file."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+
+    not_a_directory = tmp_path / "not_a_directory"
+    not_a_directory.write_text("i am a file, not a directory")
+    out_path = not_a_directory / "out.csv"
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="hunter2-distinctive-pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=[["Date", "Amount"]]):
+        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+
+    assert result.exit_code == 1
+    # No unhandled traceback: Click/Typer's CliRunner captures an
+    # unexpected exception in result.exception rather than propagating it,
+    # so assert directly that nothing but a clean typer.Exit(1) (raised as
+    # SystemExit) escaped, and that no traceback text or the password
+    # leaked into the rendered output.
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "Traceback" not in result.output
+    assert "hunter2-distinctive-pw" not in result.output
+
+
+def test_pdf_extract_overwrites_existing_output_with_warning(tmp_path):
+    """Finding 5: write_csv silently overwrites an existing output file.
+    A second run must warn visibly before clobbering it."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    out_path.write_text("stale,content\n")
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows",
+               return_value=[["Date", "Amount"], ["2026-06-01", "100"]]):
+        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0
+    assert "overwriting" in result.output.lower()
+    assert str(out_path) in result.output
+    assert out_path.read_text().splitlines()[0] == "Date,Amount"
+    assert "stale" not in out_path.read_text()

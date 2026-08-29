@@ -30,12 +30,18 @@ console = Console()
 
 gmail_app = typer.Typer(
     help="Fetch bank statement attachments from Gmail via IMAP.",
+    # Kept for consistency/explicitness, not because it's independently
+    # load-bearing: once registered via add_typer, the top-level `app`'s
+    # pretty_exceptions_show_locals is what Typer actually consults at
+    # call time — sub-apps don't control this on their own.
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(gmail_app, name="gmail")
 
 pdf_app = typer.Typer(
     help="Extract bank statement PDFs into CSV for `munim import`.",
+    # See the same note on gmail_app above: the real protection is the
+    # top-level `app`'s setting, this one is kept for explicitness only.
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(pdf_app, name="pdf")
@@ -150,22 +156,30 @@ def pdf_extract_cmd(
     password = os.environ.get("MUNIM_PDF_PASSWORD") or getpass.getpass(
         f"Password for {file.name} (never stored): ")
 
-    # Catch everything: a corrupt PDF, a wrong password, or an extraction
-    # failure must all exit cleanly rather than reach an unhandled
-    # traceback while the password is a live local.
+    # Catch everything: a corrupt PDF, a wrong password, an extraction
+    # failure, or a failure writing the output CSV (e.g. --out pointing at
+    # a path whose parent isn't a directory) must all exit cleanly rather
+    # than reach an unhandled traceback while the password is a live local.
+    # This whole block, not just the pdf-opening part, must stay inside the
+    # try — anything that can fail while `password` is still a live local
+    # belongs here.
     try:
         with open_pdf(file, password) as pdf:
             rows = extract_rows(pdf)
+
+        if not rows:
+            console.print("[yellow]No text or tables found in this PDF.[/yellow]")
+            raise typer.Exit(1)
+
+        out_path = out or file.with_suffix(".csv")
+        if out_path.exists():
+            console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
+        write_csv(rows, out_path)
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(1)
-
-    if not rows:
-        console.print("[yellow]No text or tables found in this PDF.[/yellow]")
-        raise typer.Exit(1)
-
-    out_path = out or file.with_suffix(".csv")
-    write_csv(rows, out_path)
     # soft_wrap=True: a long absolute output path (common under macOS's deep
     # /private/var/folders tmp dirs, and plausible for a user's own nested
     # download folders) must not be broken across lines by Rich's default
