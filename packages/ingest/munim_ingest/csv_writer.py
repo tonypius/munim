@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 
 
-def write_csv(rows: list[list[str]], out_path: Path) -> None:
+def write_csv(rows: list[list[str | None]], out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)

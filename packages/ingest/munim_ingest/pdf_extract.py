@@ -25,20 +25,27 @@ def open_pdf(path: Path, password: str) -> pdfplumber.PDF:
     try:
         return pdfplumber.open(path, password=password)
     except Exception as e:
+        # For the most common real failure (a wrong password), pdfplumber's
+        # underlying exception often has an empty str() — fall back to a
+        # generic reason instead of leaving a dangling, empty ": " suffix.
+        reason = str(e) or "incorrect password"
         raise PdfPasswordError(
             f"Could not open {path.name} — check the password, or this "
-            f"may not be a PDF pdfplumber can decrypt: {e}") from e
+            f"may not be a PDF pdfplumber can decrypt: {reason}") from e
 
 
-def extract_rows(pdf: pdfplumber.PDF) -> list[list[str]]:
+def extract_rows(pdf: pdfplumber.PDF) -> list[list[str | None]]:
     """Rows from every page, concatenated in order. Prefers ruled tables
     (pdfplumber's extract_tables()) if ANY page has one; if no page in the
     whole document has a table, falls back to one row per non-empty line
     of extract_text(). No column-splitting is attempted in the fallback —
     each line becomes a single-element row; munim's CSV-import wizard
     handles turning arbitrary columns into a mapped schema from there.
+    Cells can be None: pdfplumber's extract_tables() emits None for
+    empty/unruled cells in a partially-ruled table (csv.writer renders
+    those as an empty field).
     """
-    all_tables: list[list[str]] = []
+    all_tables: list[list[str | None]] = []
     for page in pdf.pages:
         for table in page.extract_tables():
             all_tables.extend(table)
