@@ -30,19 +30,40 @@ munim-ingest gmail fetch hdfc --email you@gmail.com
 
 Files land in `~/.munim-ingest/downloads/<bank>/` unless you pass `--out`.
 
-### The app password
+Decrypt a password-protected statement PDF and extract its rows to a CSV
+that [`munim import`](../classify/README.md) can consume:
+
+```sh
+munim-ingest pdf extract statement.pdf
+```
+
+This writes `statement.csv` next to the source file by default; pass
+`--out path/to/file.csv` to choose a different location. Extraction is
+generic (no bank-specific column knowledge): it uses pdfplumber's ruled
+tables where it finds them, and falls back to one row per line of text
+otherwise — run `munim import` on the resulting CSV to map columns and
+classify, same as any bank CSV export. Re-running the command overwrites
+an existing output file at the same path (with a visible warning first),
+so save any manual edits elsewhere before re-extracting.
+
+### The app password / PDF password
 
 Gmail needs an [app password](https://support.google.com/accounts/answer/185833)
-(IMAP only — no OAuth, no Google Cloud project).
+(IMAP only — no OAuth, no Google Cloud project), and `pdf extract` needs
+the PDF's own password. Both are handled the same way — read from an
+environment variable if set (`MUNIM_GMAIL_APP_PASSWORD` for `gmail fetch`,
+`MUNIM_PDF_PASSWORD` for `pdf extract`), otherwise prompted interactively.
 
-**Prefer the interactive prompt.** Running the command without setting any
-environment variable makes it prompt for the password, read it with
-`getpass` (no echo), hold it in memory only, and never write it to disk.
+**Prefer the interactive prompt.** Running either command without setting
+the corresponding environment variable makes it prompt for the password,
+read it with `getpass` (no echo), hold it in memory only, and never write
+it to disk.
 
-Avoid `MUNIM_GMAIL_APP_PASSWORD=... munim-ingest gmail fetch ...` — an
-inline assignment on a command line normally lands in your shell history
-file (`~/.zsh_history`, `~/.bash_history`), which persists the secret to
-disk through a channel this tool cannot control.
+Avoid `MUNIM_GMAIL_APP_PASSWORD=... munim-ingest gmail fetch ...` or
+`MUNIM_PDF_PASSWORD=... munim-ingest pdf extract ...` — an inline
+assignment on a command line normally lands in your shell history file
+(`~/.zsh_history`, `~/.bash_history`), which persists the secret to disk
+through a channel this tool cannot control.
 
 If you do want the environment-variable route (for scripting, or to avoid
 retyping across several runs), read it into the environment without it
@@ -53,5 +74,10 @@ read -rs MUNIM_GMAIL_APP_PASSWORD && export MUNIM_GMAIL_APP_PASSWORD
 munim-ingest gmail fetch hdfc --email you@gmail.com
 ```
 
+```sh
+read -rs MUNIM_PDF_PASSWORD && export MUNIM_PDF_PASSWORD
+munim-ingest pdf extract statement.pdf
+```
+
 The variable then lives only in that shell session; `unset
-MUNIM_GMAIL_APP_PASSWORD` clears it.
+MUNIM_GMAIL_APP_PASSWORD` (or `unset MUNIM_PDF_PASSWORD`) clears it.
