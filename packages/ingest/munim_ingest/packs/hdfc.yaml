@@ -1,7 +1,10 @@
 bank: hdfc
-# PLACEHOLDER — verify against a real HDFC statement email's From: address
-# before relying on this. See Task 5's final step.
+# hdfcbank.bank.in confirmed 2026-08-29 against a real HDFC credit card
+# e-statement (sender: emailstatements.cards@hdfcbank.bank.in). The other
+# two are unverified guesses, kept in case savings-account statements or
+# other HDFC mail types use a different domain.
 from_domains:
+  - hdfcbank.bank.in
   - hdfcbank.net
   - hdfcbank.com
 attachment_extensions:
