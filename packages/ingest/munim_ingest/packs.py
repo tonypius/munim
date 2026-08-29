@@ -17,6 +17,11 @@ class BankPack:
     bank: str
     from_domains: list[str] = field(default_factory=list)
     attachment_extensions: list[str] = field(default_factory=list)
+    # Sender-domain search alone can match years of non-statement mail
+    # (alerts, OTPs, offers) from a bank's domain — subject_keywords narrows
+    # the IMAP search to statement emails specifically. Empty by default so
+    # existing packs without this key keep today's from-domain-only search.
+    subject_keywords: list[str] = field(default_factory=list)
 
 
 class PackNotFoundError(Exception):
@@ -33,6 +38,7 @@ def load_pack(bank: str) -> BankPack:
         bank=data["bank"],
         from_domains=data.get("from_domains", []),
         attachment_extensions=data.get("attachment_extensions", [".csv", ".pdf"]),
+        subject_keywords=data.get("subject_keywords", []),
     )
 
 

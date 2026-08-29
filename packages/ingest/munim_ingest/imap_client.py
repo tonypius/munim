@@ -46,21 +46,37 @@ def build_since_criterion(since: date) -> bytes:
     return f'(SINCE "{since.strftime("%d-%b-%Y")}")'.encode()
 
 
+def build_subject_query(keywords: list[str]) -> bytes:
+    """Build an IMAP SEARCH criteria string matching any of the given
+    subject substrings, OR'd the same way build_from_query ORs domains.
+    """
+    if not keywords:
+        raise ValueError("keywords must be non-empty")
+    terms = [f'(SUBJECT "{k}")' for k in keywords]
+    query = terms[-1]
+    for term in reversed(terms[:-1]):
+        query = f"(OR {term} {query})"
+    return query.encode()
+
+
 def search_uids(conn: imaplib.IMAP4_SSL, mailbox: str, from_domains: list[str],
-                 since: date | None = None) -> list[bytes]:
+                 since: date | None = None,
+                 subject_keywords: list[str] | None = None) -> list[bytes]:
     """Search for messages from any of from_domains, optionally narrowed to
-    only messages received on/after `since`. IMAP SEARCH ANDs multiple
-    criteria passed as separate arguments — without `since`, this is
-    unfiltered by date exactly as before, which can match years of
-    unrelated mail (alerts, OTPs, promos) from a long-lived bank sender,
-    not just statements. Narrowing with `since` also matters in practice:
-    fetching thousands of messages over one IMAP connection can exhaust
-    Gmail's per-connection limits and drop the connection.
+    only messages received on/after `since` and/or whose subject contains
+    any of `subject_keywords`. IMAP SEARCH ANDs multiple criteria passed as
+    separate arguments — with neither filter, this is unfiltered exactly as
+    before, which can match years of unrelated mail (alerts, OTPs, promos)
+    from a long-lived bank sender, not just statements. Narrowing also
+    matters in practice: fetching thousands of messages over one IMAP
+    connection can exhaust Gmail's per-connection limits and drop it.
     """
     conn.select(mailbox, readonly=True)
     criteria = [build_from_query(from_domains)]
     if since is not None:
         criteria.append(build_since_criterion(since))
+    if subject_keywords:
+        criteria.append(build_subject_query(subject_keywords))
     status, data = conn.search(None, *criteria)
     if status != "OK":
         raise RuntimeError(f"IMAP search failed: {status}")

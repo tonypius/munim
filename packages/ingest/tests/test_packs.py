@@ -9,6 +9,20 @@ def test_load_hdfc_pack():
     assert "hdfcbank.net" in pack.from_domains
     assert ".csv" in pack.attachment_extensions
     assert ".pdf" in pack.attachment_extensions
+    # Sender-domain search alone matches years of non-statement mail
+    # (alerts, OTPs, offers) from a bank's domain — subject_keywords narrows
+    # it to the statement emails specifically. Confirmed against a real
+    # subject line: "Your HDFC Bank - Regalia Gold Credit Card Statement -
+    # August-2026" — the card name and month vary, "Credit Card Statement"
+    # doesn't.
+    assert "Credit Card Statement" in pack.subject_keywords
+
+
+def test_load_pack_defaults_subject_keywords_to_empty_list():
+    """A pack file with no subject_keywords key (like sib/sbi today) must
+    not filter by subject at all — empty list, not a crash."""
+    pack = load_pack("sib")
+    assert pack.subject_keywords == []
 
 
 def test_load_sib_pack():

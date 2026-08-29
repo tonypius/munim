@@ -10,3 +10,10 @@ from_domains:
 attachment_extensions:
   - .csv
   - .pdf
+# Confirmed 2026-08-29 against a real subject line: "Your HDFC Bank -
+# Regalia Gold Credit Card Statement - August-2026" — card name and month
+# vary, "Credit Card Statement" doesn't. Without this, from_domains alone
+# matched ~4700 messages over ~2.5 years (alerts/OTPs/offers, not just
+# statements) on a real, actively-used account.
+subject_keywords:
+  - Credit Card Statement

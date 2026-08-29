@@ -327,6 +327,25 @@ def test_fetch_since_valid_date_is_forwarded_to_search_uids():
     assert kwargs.get("since") == date(2024, 6, 1) or date(2024, 6, 1) in mock_search.call_args[0]
 
 
+def test_fetch_passes_pack_subject_keywords_to_search_uids():
+    """The bridge point for subject-line narrowing: the CLI must forward
+    the loaded pack's subject_keywords, not just from_domains/since."""
+    fake_conn = MagicMock()
+    fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", _sample_message_bytes())])
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1"]) as mock_search, \
+         patch("munim_ingest.cli.getpass.getpass", return_value=FAKE_PASSWORD):
+        result = runner.invoke(
+            app,
+            ["gmail", "fetch", "hdfc", "--email", "me@example.com", "--dry-run"],
+        )
+
+    assert result.exit_code == 0, result.output
+    _args, kwargs = mock_search.call_args
+    assert kwargs.get("subject_keywords") == ["Credit Card Statement"]
+
+
 def test_fetch_without_since_passes_none():
     fake_conn = MagicMock()
     fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", _sample_message_bytes())])

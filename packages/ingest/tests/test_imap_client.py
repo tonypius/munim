@@ -7,6 +7,7 @@ from munim_ingest.imap_client import (
     ImapConfig,
     build_from_query,
     build_since_criterion,
+    build_subject_query,
     search_uids,
 )
 
@@ -126,3 +127,60 @@ def test_search_uids_with_since_ands_the_date_filter_onto_the_from_query():
     joined = b" ".join(a for a in args[1:] if a is not None)
     assert b'(FROM "hdfcbank.net")' in joined
     assert b'(SINCE "01-Jun-2024")' in joined
+
+
+def test_build_subject_query_single_keyword():
+    assert build_subject_query(["Credit Card Statement"]) == b'(SUBJECT "Credit Card Statement")'
+
+
+def test_build_subject_query_multiple_keywords_ors_them():
+    query = build_subject_query(["Statement", "e-Statement"])
+    assert query == b'(OR (SUBJECT "Statement") (SUBJECT "e-Statement"))'
+
+
+def test_build_subject_query_empty_raises():
+    with pytest.raises(ValueError):
+        build_subject_query([])
+
+
+def test_search_uids_without_subject_keywords_omits_the_criterion():
+    """Empty/no subject_keywords — today's from-domain-only behavior must
+    be preserved exactly (matches every sib/sbi pack, which has none yet)."""
+    conn = MagicMock()
+    conn.select.return_value = ("OK", [b"1"])
+    conn.search.return_value = ("OK", [b"12"])
+
+    search_uids(conn, "INBOX", ["hdfcbank.net"], subject_keywords=[])
+
+    args, _kwargs = conn.search.call_args
+    joined = b" ".join(a for a in args[1:] if a is not None)
+    assert b"SUBJECT" not in joined
+
+
+def test_search_uids_with_subject_keywords_ands_them_onto_the_query():
+    conn = MagicMock()
+    conn.select.return_value = ("OK", [b"1"])
+    conn.search.return_value = ("OK", [b"12"])
+
+    search_uids(conn, "INBOX", ["hdfcbank.net"],
+                subject_keywords=["Credit Card Statement"])
+
+    args, _kwargs = conn.search.call_args
+    joined = b" ".join(a for a in args[1:] if a is not None)
+    assert b'(FROM "hdfcbank.net")' in joined
+    assert b'(SUBJECT "Credit Card Statement")' in joined
+
+
+def test_search_uids_combines_since_and_subject_keywords():
+    conn = MagicMock()
+    conn.select.return_value = ("OK", [b"1"])
+    conn.search.return_value = ("OK", [b"12"])
+
+    search_uids(conn, "INBOX", ["hdfcbank.net"], since=date(2024, 1, 1),
+                subject_keywords=["Credit Card Statement"])
+
+    args, _kwargs = conn.search.call_args
+    joined = b" ".join(a for a in args[1:] if a is not None)
+    assert b'(FROM "hdfcbank.net")' in joined
+    assert b'(SINCE "01-Jan-2024")' in joined
+    assert b'(SUBJECT "Credit Card Statement")' in joined

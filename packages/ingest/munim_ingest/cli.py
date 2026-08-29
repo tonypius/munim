@@ -115,7 +115,8 @@ def gmail_fetch(
         console.print(f"[red]Could not connect or log in: {escape(str(e))}[/red]")
         raise typer.Exit(1)
     try:
-        uids = search_uids(conn, mailbox, pack.from_domains, since=since_date)
+        uids = search_uids(conn, mailbox, pack.from_domains, since=since_date,
+                            subject_keywords=pack.subject_keywords)
         console.print(
             f"Found {len(uids)} message(s) from {escape(bank)} senders in {escape(mailbox)}.")
 
