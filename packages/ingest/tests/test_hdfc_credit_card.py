@@ -11,7 +11,10 @@ for the HDFC 5-column layout only (Date, Description, Feature Reward
 Points, Amount, trailing-empty), not as a generic claim about any other
 bank's format.
 """
-from munim_ingest.hdfc_credit_card import normalize_hdfc_credit_card_amounts
+from munim_ingest.hdfc_credit_card import (
+    normalize_hdfc_credit_card_amounts,
+    normalize_hdfc_credit_card_dates,
+)
 
 
 def test_bare_amount_becomes_negative_debit():
@@ -73,6 +76,43 @@ def test_unparseable_amount_is_left_unchanged_not_crashed():
     rows = [["21/01/2024", "X", None, "not-a-number", None]]
     result = normalize_hdfc_credit_card_amounts(rows)
     assert result == [["21/01/2024", "X", None, "not-a-number", None]]
+
+
+def test_date_with_time_component_is_stripped_to_date_only():
+    """munim's date parser has no format entry that includes a time
+    component — 'DD/MM/YYYY HH:MM:SS' (present on most card-swipe rows,
+    absent on fee/interest rows that are date-only) fails to parse
+    entirely, crashing the import with an unhandled traceback."""
+    rows = [["21/01/2024 12:55:34", "GROFERS INDIA", None, "-379.00", None]]
+    result = normalize_hdfc_credit_card_dates(rows)
+    assert result == [["21/01/2024", "GROFERS INDIA", None, "-379.00", None]]
+
+
+def test_date_without_time_component_is_left_alone():
+    rows = [["21/01/2024", "IGST FEE", None, "-6.45", None]]
+    result = normalize_hdfc_credit_card_dates(rows)
+    assert result == [["21/01/2024", "IGST FEE", None, "-6.45", None]]
+
+
+def test_date_with_stray_prefix_is_cleaned():
+    """A real extraction artifact: pdfplumber occasionally prepends stray
+    text before the date (filter_transaction_rows already tolerates this
+    when detecting a transaction row — the date cell itself still needs
+    cleaning before munim's parser, which has no tolerance for it at
+    all)."""
+    rows = [["null09/02/2024 14:54:14", "SLACK SUBSCRIPTION", "144", "-5438.01", None]]
+    result = normalize_hdfc_credit_card_dates(rows)
+    assert result == [["09/02/2024", "SLACK SUBSCRIPTION", "144", "-5438.01", None]]
+
+
+def test_row_with_fewer_columns_or_no_date_match_is_left_unchanged():
+    rows = [["not a date at all", "X", None, "-1.00", None]]
+    result = normalize_hdfc_credit_card_dates(rows)
+    assert result == rows
+
+
+def test_dates_empty_input_returns_empty():
+    assert normalize_hdfc_credit_card_dates([]) == []
 
 
 def test_real_extracted_data_shape_end_to_end():

@@ -15,17 +15,21 @@ from rich.markup import escape
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
 from . import hdfc_credit_card
-from .hdfc_credit_card import normalize_hdfc_credit_card_amounts
+from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
 from .pdf_extract import PdfPasswordError, extract_rows, filter_transaction_rows, open_pdf
 
+def _normalize_hdfc_credit_card(rows):
+    return normalize_hdfc_credit_card_dates(normalize_hdfc_credit_card_amounts(rows))
+
+
 # Bank-specific post-filter normalizers, opted into via `pdf extract --bank`.
-# Each is scoped to exactly one bank's known amount/column convention —
+# Each is scoped to exactly one bank's known amount/column/date convention —
 # never applied by default, since it encodes real assumptions about that
 # bank's statement layout that don't generalize to others.
 BANK_NORMALIZERS = {
-    "hdfc": normalize_hdfc_credit_card_amounts,
+    "hdfc": _normalize_hdfc_credit_card,
 }
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
@@ -274,9 +278,10 @@ def pdf_extract_cmd(
             if bank is not None:
                 final_rows = BANK_NORMALIZERS[bank](final_rows)
                 console.print(
-                    f"Applied {escape(bank)} amount normalization "
-                    "(positive-magnitude + Cr/Dr suffix → munim's signed "
-                    "amount convention).")
+                    f"Applied {escape(bank)} normalization (amount: "
+                    "positive-magnitude + Cr/Dr suffix → munim's signed "
+                    "convention; date: strips a time component and any "
+                    "stray leading text down to a bare date).")
 
             # munim import's column-mapping wizard treats row 1 as a
             # header (csv.DictReader) — filter_transaction_rows's output

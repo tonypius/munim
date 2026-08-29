@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import re
 
+DATE_COL = 0
 AMOUNT_COL = 3
 _SUFFIX_RE = re.compile(r"(cr|dr)\s*$", re.IGNORECASE)
+_DATE_RE = re.compile(r"\d{2}/\d{2}/\d{4}")
 
 # The real column header row extracted from an HDFC statement's own table
 # ("Date | Transaction Description | Feature Reward Points | Amount (in
@@ -65,5 +67,41 @@ def normalize_hdfc_credit_card_amounts(
         signed = value if suffix == "cr" else -value
         new_row = list(row)
         new_row[AMOUNT_COL] = f"{signed:.2f}"
+        result.append(new_row)
+    return result
+
+
+def normalize_hdfc_credit_card_dates(
+    rows: list[list[str | None]],
+) -> list[list[str | None]]:
+    """Rewrites each row's date column (index 0) down to a bare DD/MM/YYYY
+    date, discarding a trailing time component and any stray leading text.
+
+    munim's date parser (packages/classify) has no format entry that
+    tolerates a time component, and most card-swipe rows carry one
+    ("21/01/2024 12:55:34") while fee/interest rows are date-only
+    ("21/01/2024") — the mixed formats within one statement would crash
+    every import on the first timestamped row. Extraction can also
+    prepend stray text before the date on rare rows (a pdfplumber
+    artifact, not a data error) — filter_transaction_rows already
+    tolerates this when deciding a row IS a transaction, but the date
+    cell itself still needs cleaning before it reaches munim's parser,
+    which has no tolerance for it at all.
+
+    Rows without a date-shaped substring in column 0 are left unchanged
+    rather than guessed at — munim import's own parser will raise a clear
+    error on those, which is more informative than a silent no-op here.
+    """
+    result = []
+    for row in rows:
+        if len(row) <= DATE_COL or not row[DATE_COL]:
+            result.append(row)
+            continue
+        match = _DATE_RE.search(row[DATE_COL])
+        if not match:
+            result.append(row)
+            continue
+        new_row = list(row)
+        new_row[DATE_COL] = match.group(0)
         result.append(new_row)
     return result

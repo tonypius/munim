@@ -301,11 +301,32 @@ def test_pdf_extract_bank_hdfc_normalizes_amounts(tmp_path):
             app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
 
     assert result.exit_code == 0, result.output
-    assert "hdfc amount normalization" in result.output.lower()
+    assert "hdfc normalization" in result.output.lower()
     lines = out_path.read_text().splitlines()
     assert lines[0] == "Date,Transaction Description,Feature Reward Points,Amount (in Rs.),"
     assert lines[1].endswith(",-100.00,")
     assert lines[2].endswith(",50.00,")
+
+
+def test_pdf_extract_bank_hdfc_strips_time_component_from_dates(tmp_path):
+    """munim's date parser can't handle a time component — the exact
+    crash that would have hit `munim import` on a real HDFC statement
+    before this normalization existed."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["21/01/2024 12:55:34", "GROFERS INDIA", None, "379.00", None]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[1].startswith("21/01/2024,")
+    assert "12:55:34" not in lines[1]
 
 
 def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
