@@ -22,6 +22,14 @@ import re
 AMOUNT_COL = 3
 _SUFFIX_RE = re.compile(r"(cr|dr)\s*$", re.IGNORECASE)
 
+# The real column header row extracted from an HDFC statement's own table
+# ("Date | Transaction Description | Feature Reward Points | Amount (in
+# Rs.) | <empty>") — used to label munim import's column-mapping wizard
+# with the real names instead of a generic "Column 1/2/3..." placeholder,
+# when the extracted row width matches this known 5-column shape.
+HEADER_ROW = ["Date", "Transaction Description", "Feature Reward Points",
+              "Amount (in Rs.)", ""]
+
 
 def normalize_hdfc_credit_card_amounts(
     rows: list[list[str | None]],

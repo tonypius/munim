@@ -14,6 +14,7 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
+from . import hdfc_credit_card
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -277,6 +278,23 @@ def pdf_extract_cmd(
                     "(positive-magnitude + Cr/Dr suffix → munim's signed "
                     "amount convention).")
 
+            # munim import's column-mapping wizard treats row 1 as a
+            # header (csv.DictReader) — filter_transaction_rows's output
+            # never has one (the real header row, if any, doesn't start
+            # with a date and gets filtered out along with the other
+            # noise), so without this, the wizard would silently treat
+            # the first real transaction as the header and drop it. Use
+            # HDFC's real, known column names when the shape matches what
+            # --bank hdfc expects; otherwise a generic numbered header —
+            # honest about not knowing the semantic meaning of a column
+            # for a bank this tool hasn't verified.
+            width = len(final_rows[0])
+            if bank == "hdfc" and width == len(hdfc_credit_card.HEADER_ROW):
+                header_row = hdfc_credit_card.HEADER_ROW
+            else:
+                header_row = [f"Column {i + 1}" for i in range(width)]
+            final_rows = [header_row, *final_rows]
+
         out_path = out or file.with_suffix(".csv")
         if out_path.exists():
             console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
@@ -290,8 +308,11 @@ def pdf_extract_cmd(
     # /private/var/folders tmp dirs, and plausible for a user's own nested
     # download folders) must not be broken across lines by Rich's default
     # 80-column wrap, which would corrupt the path if copy-pasted.
-    console.print(f"[green]Extracted {len(final_rows)} row(s) to {escape(str(out_path))}[/green]",
-                  soft_wrap=True)
+    row_word = "row" if raw else "transaction row"
+    row_count = len(final_rows) - (0 if raw else 1)  # exclude the prepended header
+    console.print(
+        f"[green]Extracted {row_count} {row_word}(s) to {escape(str(out_path))}[/green]",
+        soft_wrap=True)
     console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
                   "to map columns and classify.", soft_wrap=True)
 

@@ -162,7 +162,8 @@ def test_pdf_extract_filters_by_default_and_reports_counts(tmp_path):
     assert "kept 2" in result.output.lower()
     assert "filtered out 1" in result.output.lower()
     lines = out_path.read_text().splitlines()
-    assert len(lines) == 2
+    assert len(lines) == 3  # generic header + 2 kept transaction rows
+    assert lines[0] == "Column 1,Column 2,Column 3"
     assert "Statement Title Noise" not in out_path.read_text()
 
 
@@ -205,6 +206,85 @@ def test_pdf_extract_zero_kept_after_filter_exits_cleanly(tmp_path):
     assert "--raw" in result.output
 
 
+def test_pdf_extract_prepends_generic_header_by_default(tmp_path):
+    """munim import's column wizard treats row 1 as a header — the
+    filtered output has no header row (it was itself filtered out as
+    non-transaction noise), so one must be added or the wizard would
+    silently treat the first real transaction as the header."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/01/2024", "STORE", "100.00"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(app, ["pdf", "extract", str(pdf_path), "--out", str(out_path)])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Column 1,Column 2,Column 3"
+    assert lines[1] == "01/01/2024,STORE,100.00"
+
+
+def test_pdf_extract_raw_does_not_add_a_header(tmp_path):
+    """--raw is an inspect-the-raw-extraction escape hatch — row widths
+    may not even be uniform, so no header is fabricated."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["Some Header Text"], ["01/01/2024", "STORE", "100.00"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--raw"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Some Header Text"
+    assert lines[1] == "01/01/2024,STORE,100.00"
+
+
+def test_pdf_extract_bank_hdfc_uses_real_header_labels(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/01/2024", "GROCERY STORE", None, "100.00", None]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Date,Transaction Description,Feature Reward Points,Amount (in Rs.),"
+    assert lines[1] == "01/01/2024,GROCERY STORE,,-100.00,"
+
+
+def test_pdf_extract_bank_hdfc_falls_back_to_generic_header_on_unexpected_width(tmp_path):
+    """If a real HDFC statement ever yields a width other than 5 (a
+    layout variant), fall back to the generic numbered header rather
+    than mislabel columns with the wrong semantic names."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/01/2024", "STORE", "100.00"]]  # 3 columns, not HDFC's 5
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Column 1,Column 2,Column 3"
+
+
 def test_pdf_extract_bank_hdfc_normalizes_amounts(tmp_path):
     pdf_path = tmp_path / "statement.pdf"
     pdf_path.write_bytes(b"%PDF-fake")
@@ -223,8 +303,9 @@ def test_pdf_extract_bank_hdfc_normalizes_amounts(tmp_path):
     assert result.exit_code == 0, result.output
     assert "hdfc amount normalization" in result.output.lower()
     lines = out_path.read_text().splitlines()
-    assert lines[0].endswith(",-100.00,")
-    assert lines[1].endswith(",50.00,")
+    assert lines[0] == "Date,Transaction Description,Feature Reward Points,Amount (in Rs.),"
+    assert lines[1].endswith(",-100.00,")
+    assert lines[2].endswith(",50.00,")
 
 
 def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
