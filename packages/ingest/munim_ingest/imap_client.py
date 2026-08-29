@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import imaplib
 from dataclasses import dataclass, field
+from datetime import date
 
 
 @dataclass
@@ -39,10 +40,28 @@ def build_from_query(from_domains: list[str]) -> bytes:
     return query.encode()
 
 
-def search_uids(conn: imaplib.IMAP4_SSL, mailbox: str, from_domains: list[str]) -> list[bytes]:
+def build_since_criterion(since: date) -> bytes:
+    """IMAP's SINCE search key wants DD-Mon-YYYY (e.g. 01-Jan-2024), not
+    ISO format."""
+    return f'(SINCE "{since.strftime("%d-%b-%Y")}")'.encode()
+
+
+def search_uids(conn: imaplib.IMAP4_SSL, mailbox: str, from_domains: list[str],
+                 since: date | None = None) -> list[bytes]:
+    """Search for messages from any of from_domains, optionally narrowed to
+    only messages received on/after `since`. IMAP SEARCH ANDs multiple
+    criteria passed as separate arguments — without `since`, this is
+    unfiltered by date exactly as before, which can match years of
+    unrelated mail (alerts, OTPs, promos) from a long-lived bank sender,
+    not just statements. Narrowing with `since` also matters in practice:
+    fetching thousands of messages over one IMAP connection can exhaust
+    Gmail's per-connection limits and drop the connection.
+    """
     conn.select(mailbox, readonly=True)
-    query = build_from_query(from_domains)
-    status, data = conn.search(None, query)
+    criteria = [build_from_query(from_domains)]
+    if since is not None:
+        criteria.append(build_since_criterion(since))
+    status, data = conn.search(None, *criteria)
     if status != "OK":
         raise RuntimeError(f"IMAP search failed: {status}")
     if not data or not data[0]:

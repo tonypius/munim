@@ -294,6 +294,128 @@ def test_fetch_isolates_per_message_errors(tmp_path):
     fake_conn.logout.assert_called_once()
 
 
+# --- --since date narrowing -------------------------------------------
+
+def test_fetch_since_invalid_format_exits_cleanly():
+    result = runner.invoke(
+        app,
+        ["gmail", "fetch", "hdfc", "--email", "me@example.com", "--since", "not-a-date"],
+    )
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "yyyy-mm-dd" in result.output.lower()
+
+
+def test_fetch_since_valid_date_is_forwarded_to_search_uids():
+    from datetime import date
+
+    fake_conn = MagicMock()
+    fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", _sample_message_bytes())])
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1"]) as mock_search, \
+         patch("munim_ingest.cli.getpass.getpass", return_value=FAKE_PASSWORD):
+        result = runner.invoke(
+            app,
+            ["gmail", "fetch", "hdfc", "--email", "me@example.com",
+             "--since", "2024-06-01", "--dry-run"],
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_search.assert_called_once()
+    _args, kwargs = mock_search.call_args
+    assert kwargs.get("since") == date(2024, 6, 1) or date(2024, 6, 1) in mock_search.call_args[0]
+
+
+def test_fetch_without_since_passes_none():
+    fake_conn = MagicMock()
+    fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", _sample_message_bytes())])
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1"]) as mock_search, \
+         patch("munim_ingest.cli.getpass.getpass", return_value=FAKE_PASSWORD):
+        result = runner.invoke(
+            app,
+            ["gmail", "fetch", "hdfc", "--email", "me@example.com", "--dry-run"],
+        )
+
+    assert result.exit_code == 0, result.output
+    _args, kwargs = mock_search.call_args
+    since_value = kwargs.get("since") if "since" in kwargs else mock_search.call_args[0][-1]
+    assert since_value is None
+
+
+# --- Circuit breaker: a dead connection must not grind through every -----
+# --- remaining message printing the same error one at a time -------------
+
+def test_fetch_stops_after_consecutive_failure_streak(tmp_path):
+    """Simulates a broken pipe on every fetch from message 3 onward — the
+    command must stop early with a clear message instead of looping
+    through all remaining UIDs re-raising the same dead-connection error."""
+    out_dir = tmp_path / "out"
+    fake_conn = MagicMock()
+    uids = [str(i).encode() for i in range(1, 21)]  # 20 messages queued
+
+    def _fetch(uid, _spec):
+        if uid in (b"1", b"2"):
+            return ("OK", [(b"hdr", _sample_message_bytes(filename=f"{uid.decode()}.csv"))])
+        raise OSError("[Errno 32] Broken pipe")
+
+    fake_conn.fetch.side_effect = _fetch
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=uids), \
+         patch("munim_ingest.cli.getpass.getpass", return_value=FAKE_PASSWORD):
+        result = runner.invoke(
+            app,
+            ["gmail", "fetch", "hdfc", "--email", "me@example.com", "--out", str(out_dir)],
+        )
+
+    assert result.exit_code == 0, result.output
+    # The two good messages before the streak were saved.
+    assert (out_dir / "1.csv").exists()
+    assert (out_dir / "2.csv").exists()
+    # It must have stopped well before attempting all 18 remaining UIDs —
+    # not ground through every single one printing the identical error.
+    assert fake_conn.fetch.call_count < 15
+    assert "stopping" in result.output.lower()
+    assert "broken pipe" in result.output.lower()
+
+
+def test_fetch_does_not_trip_breaker_on_interspersed_failures(tmp_path):
+    """Occasional isolated failures mixed with successes must not trip the
+    circuit breaker — only a sustained streak indicates a dead connection."""
+    out_dir = tmp_path / "out"
+    fake_conn = MagicMock()
+    # Pattern: fail, fail, succeed, fail, fail, succeed, ... never 5 in a row.
+    uids = [str(i).encode() for i in range(1, 10)]
+
+    def _fetch(uid, _spec):
+        n = int(uid)
+        if n % 3 == 0:
+            return ("OK", [(b"hdr", _sample_message_bytes(filename=f"{n}.csv"))])
+        raise ValueError("transient blip")
+
+    fake_conn.fetch.side_effect = _fetch
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=uids), \
+         patch("munim_ingest.cli.getpass.getpass", return_value=FAKE_PASSWORD):
+        result = runner.invoke(
+            app,
+            ["gmail", "fetch", "hdfc", "--email", "me@example.com", "--out", str(out_dir)],
+        )
+
+    assert result.exit_code == 0, result.output
+    # All 9 UIDs must have been attempted — the breaker must not have
+    # tripped on scattered, non-consecutive failures.
+    assert fake_conn.fetch.call_count == 9
+    assert "stopping" not in result.output.lower()
+    assert (out_dir / "3.csv").exists()
+    assert (out_dir / "6.csv").exists()
+    assert (out_dir / "9.csv").exists()
+
+
 def _sample_message_bytes(
     filename: str = "statement.csv", content: bytes = b"date,amount\n2026-06-01,100",
 ) -> bytes:

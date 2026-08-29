@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import getpass
 import os
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -48,6 +49,13 @@ app.add_typer(pdf_app, name="pdf")
 
 DEFAULT_HOME = Path.home() / ".munim-ingest"
 
+# A long-lived Gmail account can have years of mail from a bank's sending
+# domain that isn't a statement (alerts, OTPs, promos) — --since narrows the
+# search dramatically. It also matters for connection stability: fetching
+# thousands of messages over one IMAP connection has been observed to
+# exhaust Gmail's per-connection limits and drop the connection outright.
+CONSECUTIVE_FAILURE_LIMIT = 5
+
 
 @gmail_app.command("list-banks")
 def gmail_list_banks():
@@ -64,6 +72,13 @@ def gmail_fetch(
     mailbox: str = typer.Option("INBOX", help="IMAP mailbox to search"),
     imap_host: str = typer.Option("imap.gmail.com"),
     imap_port: int = typer.Option(993),
+    since: str = typer.Option(
+        None, "--since",
+        help="Only messages on/after this date (YYYY-MM-DD). Strongly "
+             "recommended for a long-lived inbox — sender-domain search alone "
+             "can match years of unrelated mail from the bank, not just "
+             "statements, and fetching thousands of messages risks Gmail "
+             "dropping the connection."),
     dry_run: bool = typer.Option(False, "--dry-run", help="List matches without downloading"),
 ):
     """Search Gmail for a bank's statement emails and download matching
@@ -79,6 +94,14 @@ def gmail_fetch(
         console.print(f"[red]{escape(str(e))}[/red]")
         raise typer.Exit(1)
 
+    since_date = None
+    if since is not None:
+        try:
+            since_date = datetime.strptime(since, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[red]--since must be YYYY-MM-DD, got {escape(since)}[/red]")
+            raise typer.Exit(1)
+
     password = os.environ.get("MUNIM_GMAIL_APP_PASSWORD") or getpass.getpass(
         f"App password for {email} (never stored): ")
 
@@ -92,15 +115,22 @@ def gmail_fetch(
         console.print(f"[red]Could not connect or log in: {escape(str(e))}[/red]")
         raise typer.Exit(1)
     try:
-        uids = search_uids(conn, mailbox, pack.from_domains)
+        uids = search_uids(conn, mailbox, pack.from_domains, since=since_date)
         console.print(
             f"Found {len(uids)} message(s) from {escape(bank)} senders in {escape(mailbox)}.")
 
         total = 0
+        consecutive_failures = 0
         out_dir = out or (DEFAULT_HOME / "downloads" / bank)
         for uid in uids:
             # Isolate per-message failures: one malformed or crafted message
-            # must not abandon every remaining message in the run.
+            # must not abandon every remaining message in the run. But a
+            # SUSTAINED streak of failures usually means the connection
+            # itself died (e.g. a broken pipe from Gmail dropping a
+            # connection under heavy fetch load) — every subsequent fetch on
+            # a dead connection fails identically, so grinding through
+            # thousands of remaining UIDs one at a time wastes time and
+            # floods the output. Stop after a short streak instead.
             try:
                 status, data = conn.fetch(uid, "(RFC822)")
                 if status != "OK" or not data or not data[0]:
@@ -128,9 +158,21 @@ def gmail_fetch(
                         console.print(f"  [green]saved:[/green] {escape(str(path))}")
                     total += len(saved)
             except Exception as e:
+                consecutive_failures += 1
                 console.print(
                     f"[yellow]Skipping message {escape(str(uid))}: {escape(str(e))}[/yellow]")
+                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                    console.print(
+                        f"\n[red]Stopping after {consecutive_failures} consecutive "
+                        "failures — the connection may have dropped. "
+                        f"{total} attachment(s) processed before the failures started. "
+                        "Try narrowing further with --since, or re-run once the "
+                        "connection issue clears (already-saved files are kept, not "
+                        "re-downloaded).[/red]")
+                    break
                 continue
+            else:
+                consecutive_failures = 0
 
         if dry_run:
             console.print(f"\n[bold]{total}[/bold] attachment(s) would be downloaded (dry run).")

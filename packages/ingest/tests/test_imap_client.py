@@ -1,8 +1,14 @@
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
 
-from munim_ingest.imap_client import ImapConfig, build_from_query, search_uids
+from munim_ingest.imap_client import (
+    ImapConfig,
+    build_from_query,
+    build_since_criterion,
+    search_uids,
+)
 
 FAKE_PASSWORD = "hunter2-totally-distinctive-app-password"
 
@@ -85,3 +91,38 @@ def test_search_uids_raises_on_search_failure():
 
     with pytest.raises(RuntimeError):
         search_uids(conn, "INBOX", ["hdfcbank.net"])
+
+
+def test_build_since_criterion_formats_imap_date():
+    """IMAP's SINCE search key wants DD-Mon-YYYY, e.g. 01-Jan-2024 — not
+    ISO format."""
+    assert build_since_criterion(date(2024, 1, 1)) == b'(SINCE "01-Jan-2024")'
+    assert build_since_criterion(date(2026, 12, 31)) == b'(SINCE "31-Dec-2026")'
+
+
+def test_search_uids_without_since_omits_the_criterion():
+    """No date filter given — the search call must not mention SINCE at
+    all, preserving today's unfiltered behavior exactly."""
+    conn = MagicMock()
+    conn.select.return_value = ("OK", [b"1"])
+    conn.search.return_value = ("OK", [b"12"])
+
+    search_uids(conn, "INBOX", ["hdfcbank.net"])
+
+    args, _kwargs = conn.search.call_args
+    # args[0] is the charset (None); the rest are the search criteria.
+    joined = b" ".join(a for a in args[1:] if a is not None)
+    assert b"SINCE" not in joined
+
+
+def test_search_uids_with_since_ands_the_date_filter_onto_the_from_query():
+    conn = MagicMock()
+    conn.select.return_value = ("OK", [b"1"])
+    conn.search.return_value = ("OK", [b"12"])
+
+    search_uids(conn, "INBOX", ["hdfcbank.net"], since=date(2024, 6, 1))
+
+    args, _kwargs = conn.search.call_args
+    joined = b" ".join(a for a in args[1:] if a is not None)
+    assert b'(FROM "hdfcbank.net")' in joined
+    assert b'(SINCE "01-Jun-2024")' in joined
