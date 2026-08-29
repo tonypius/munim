@@ -12,8 +12,10 @@ from rich.console import Console
 from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
+from .csv_writer import write_csv
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
+from .pdf_extract import PdfPasswordError, extract_rows, open_pdf
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
 # this CLI must never render a locals table, which would print the Gmail
@@ -31,6 +33,12 @@ gmail_app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(gmail_app, name="gmail")
+
+pdf_app = typer.Typer(
+    help="Extract bank statement PDFs into CSV for `munim import`.",
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(pdf_app, name="pdf")
 
 DEFAULT_HOME = Path.home() / ".munim-ingest"
 
@@ -125,6 +133,47 @@ def gmail_fetch(
                 f"\n[bold]{total}[/bold] attachment(s) downloaded to {escape(str(out_dir))}.")
     finally:
         conn.logout()
+
+
+@pdf_app.command("extract")
+def pdf_extract_cmd(
+    file: Path = typer.Argument(..., exists=True, help="Password-protected statement PDF"),
+    out: Path = typer.Option(None, help="Output CSV path (default: <file>.csv next to the source)"),
+):
+    """Decrypt a password-protected statement PDF and extract its rows to a
+    CSV file. The password is read from MUNIM_PDF_PASSWORD if set,
+    otherwise prompted — never written to disk. Extraction is generic (no
+    bank-specific column knowledge): ruled tables where pdfplumber finds
+    them, one row per line of text otherwise. Run `munim import` on the
+    output next to map columns and classify, same as any bank CSV export.
+    """
+    password = os.environ.get("MUNIM_PDF_PASSWORD") or getpass.getpass(
+        f"Password for {file.name} (never stored): ")
+
+    # Catch everything: a corrupt PDF, a wrong password, or an extraction
+    # failure must all exit cleanly rather than reach an unhandled
+    # traceback while the password is a live local.
+    try:
+        with open_pdf(file, password) as pdf:
+            rows = extract_rows(pdf)
+    except Exception as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
+
+    if not rows:
+        console.print("[yellow]No text or tables found in this PDF.[/yellow]")
+        raise typer.Exit(1)
+
+    out_path = out or file.with_suffix(".csv")
+    write_csv(rows, out_path)
+    # soft_wrap=True: a long absolute output path (common under macOS's deep
+    # /private/var/folders tmp dirs, and plausible for a user's own nested
+    # download folders) must not be broken across lines by Rich's default
+    # 80-column wrap, which would corrupt the path if copy-pasted.
+    console.print(f"[green]Extracted {len(rows)} row(s) to {escape(str(out_path))}[/green]",
+                  soft_wrap=True)
+    console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
+                  "to map columns and classify.", soft_wrap=True)
 
 
 if __name__ == "__main__":
