@@ -17,10 +17,11 @@ dependencies = [
   "typer>=0.16",
   "rich>=13.0",
   "pyyaml>=6.0",
+  "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "pypdf>=4.0", "reportlab>=4.0"]
 
 [project.scripts]
 munim-ingest = "munim_ingest.cli:app"
