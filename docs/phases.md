@@ -42,15 +42,20 @@ pack file, mirroring the existing region-pack pattern in
 
 Plan: [superpowers/plans/2026-08-29-gmail-ingest.md](superpowers/plans/2026-08-29-gmail-ingest.md)
 
-## Phase 2 — Ingest: PDF extraction (per-bank adapters)
-**Status: not started**
+## Phase 2 — Ingest: PDF extraction
+**Status: done**
 
-Per-bank adapters, starting with South Indian Bank, HDFC Bank, and
-SBI. All three banks' statement PDFs are password-protected, so the
-adapter must decrypt on open. Produces the same canonical JSONL
-contract as Phase 1's Gmail fetch, so both feed `classify` identically.
+`munim-ingest pdf extract <file.pdf>` decrypts a password-protected
+statement PDF (pdfplumber's native password support — no per-bank
+knowledge needed) and extracts its rows generically: ruled tables where
+found, one row per line of text otherwise. Output is a CSV file, fed into
+the existing `munim import` command's interactive column-mapping wizard
+(from `packages/classify`) rather than a bank-specific parser — nobody
+implementing this had a real HDFC/SBI/SIB statement PDF to build or
+verify a column parser against, and reusing the proven wizard avoided
+guessing at layouts that determine real transaction amounts.
 
-Plan: not yet written.
+Plan: [superpowers/plans/2026-08-29-pdf-extraction.md](superpowers/plans/2026-08-29-pdf-extraction.md)
 
 ## Phase 3 — Viz package
 **Status: deferred**
