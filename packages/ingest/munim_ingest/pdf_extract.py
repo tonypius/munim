@@ -28,3 +28,27 @@ def open_pdf(path: Path, password: str) -> pdfplumber.PDF:
         raise PdfPasswordError(
             f"Could not open {path.name} — check the password, or this "
             f"may not be a PDF pdfplumber can decrypt: {e}") from e
+
+
+def extract_rows(pdf: pdfplumber.PDF) -> list[list[str]]:
+    """Rows from every page, concatenated in order. Prefers ruled tables
+    (pdfplumber's extract_tables()) if ANY page has one; if no page in the
+    whole document has a table, falls back to one row per non-empty line
+    of extract_text(). No column-splitting is attempted in the fallback —
+    each line becomes a single-element row; munim's CSV-import wizard
+    handles turning arbitrary columns into a mapped schema from there.
+    """
+    all_tables: list[list[str]] = []
+    for page in pdf.pages:
+        for table in page.extract_tables():
+            all_tables.extend(table)
+    if all_tables:
+        return all_tables
+
+    all_lines: list[list[str]] = []
+    for page in pdf.pages:
+        text = page.extract_text() or ""
+        for line in text.splitlines():
+            if line.strip():
+                all_lines.append([line])
+    return all_lines
