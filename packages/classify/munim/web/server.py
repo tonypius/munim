@@ -55,7 +55,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/transactions":
             self._send(self._transactions(q))
         elif route == "/api/queue":
-            self._send(self._queue())
+            self._send(self._queue(q))
         elif route == "/api/categories":
             self._send(self._categories())
         elif route == "/api/rules":
@@ -177,8 +177,38 @@ class Handler(BaseHTTPRequestHandler):
                          for t in self.store.all_transactions()}, reverse=True)
         return {"rows": rows, "months": months}
 
-    def _queue(self):
-        return {"rows": [self._row(t) for t in self.store.review_queue()[:100]]}
+    def _queue(self, q):
+        # Same param names as /api/transactions (month, q) for a consistent
+        # filter surface, plus `suggested` — a category name to show only
+        # rows currently suggested as that category (pairs with bulk-
+        # assign: filter to one suggestion, select-all, confirm in one
+        # shot), or the sentinel "__none__" for rows with no suggestion at
+        # all. review_queue() is already ordered lowest-confidence-first;
+        # filtering narrows that same ordered list, it doesn't reorder it.
+        month, needle = q.get("month", ""), q.get("q", "").upper()
+        suggested = q.get("suggested", "")
+        filtered = bool(month or needle or suggested)
+        limit = 500 if filtered else 100
+        queue = self.store.review_queue()
+        rows = []
+        for t in queue:
+            if month and not t.date.isoformat().startswith(month):
+                continue
+            if suggested == "__none__" and t.category:
+                continue
+            if suggested and suggested != "__none__" and t.category != suggested:
+                continue
+            if needle:
+                hay = f"{t.merchant_norm} {t.payee_handle} {t.category} " \
+                      f"{t.description_raw}".upper()
+                if needle not in hay:
+                    continue
+            rows.append(self._row(t))
+            if len(rows) >= limit:
+                break
+        months = sorted({t.date.isoformat()[:7] for t in queue}, reverse=True)
+        suggestions = sorted({t.category for t in queue if t.category})
+        return {"rows": rows, "months": months, "suggestions": suggestions}
 
     def _categories(self):
         cats = self.store.get_config("categories", [])

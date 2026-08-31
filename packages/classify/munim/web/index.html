@@ -138,6 +138,11 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <p class="note">Confirm a merchant once and every identical entry across the
   ledger is written up with it. People (blue) are only ever categorized by you.
   Tick several rows and assign one head at once to avoid repeated clicks.</p>
+  <div class="controls">
+    <select id="rMonth"><option value="">All months</option></select>
+    <select id="rSuggested"><option value="">All suggestions</option><option value="__none__">No suggestion</option></select>
+    <input id="rSearch" placeholder="Search merchant, category, raw text" size="34">
+  </div>
   <div class="controls" id="bulkBar" hidden>
     <span id="bulkCount"></span>
     <select id="bulkCat"></select>
@@ -217,9 +222,20 @@ async function overview(){
 
 /* review */
 async function review(){
-  const {rows}=await api("/api/queue");
+  const month=$("#rMonth")?.value||"", qtext=$("#rSearch")?.value||"",
+        suggested=$("#rSuggested")?.value||"";
+  const filtered=!!(month||qtext||suggested);
+  const params=new URLSearchParams({month,q:qtext,suggested});
+  const {rows,months,suggestions}=await api(`/api/queue?${params}`);
+  if($("#rMonth").options.length===1)
+    months.forEach(m=>$("#rMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
+  if($("#rSuggested").options.length===2)
+    suggestions.forEach(s=>$("#rSuggested")
+      .insertAdjacentHTML("beforeend",`<option value="${esc(s)}">${esc(s)}</option>`));
   if(!rows.length){
-    $("#reviewBody").innerHTML=`<p class="empty">Queue is empty — the munim rests.</p>`;
+    $("#reviewBody").innerHTML=`<p class="empty">${filtered
+      ?"No entries match — try clearing a filter."
+      :"Queue is empty — the munim rests."}</p>`;
     $("#bulkBar").hidden=true;
     return;
   }
@@ -244,6 +260,9 @@ function updateBulkBar(){
   $("#bulkBar").hidden=n===0;
   $("#bulkCount").textContent=n===1?"1 selected":`${n} selected`;
 }
+$("#rMonth").addEventListener("change",review);
+$("#rSuggested").addEventListener("change",review);
+let rdeb;$("#rSearch").addEventListener("input",()=>{clearTimeout(rdeb);rdeb=setTimeout(review,250)});
 /* Selection: delegated on the stable #reviewBody container, same reason
    as the confirm-button listener below — checkboxes are recreated on
    every review() render, a listener attached to them directly would be

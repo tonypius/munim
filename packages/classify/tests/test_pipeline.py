@@ -202,6 +202,73 @@ def test_web_multiple_confirms_and_new_endpoints(tmp_path):
     srv.shutdown()
 
 
+def test_web_queue_search_and_filters(tmp_path):
+    """The review page's search bar and filters: /api/queue accepts the
+    same query params as /api/transactions (month, q), plus a `suggested`
+    filter (a category name, or the sentinel "__none__" for rows with no
+    suggestion at all) — the search/filter surface a large queue needs to
+    be navigable rather than just the first 100 lowest-confidence rows."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Groceries", "Other"])
+    txns = [
+        # SWIGGY is a real community-dictionary entry (-> Dining); the
+        # other two deliberately are not, so they land with no suggestion.
+        Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY DINER@okaxis-999912345001"),
+        Transaction(date="2026-07-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-UNMAPPED MART@okaxis-999912345002"),
+        Transaction(date="2026-07-02", amount=300, direction=Direction.DEBIT,
+                    description_raw="UPI-RANDOM UNKNOWN CO@okaxis-999912345003"),
+    ]
+    Pipeline(store).run(txns)
+    store.upsert_transactions(txns)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    # unfiltered: all three still in the queue
+    assert len(get("/api/queue")["rows"]) == 3
+
+    # text search over merchant/description
+    assert [r["merchant"] for r in get("/api/queue?q=SWIGGY")["rows"]] == ["SWIGGY DINER"]
+
+    # month filter
+    assert len(get("/api/queue?month=2026-07")["rows"]) == 2
+    assert len(get("/api/queue?month=2026-06")["rows"]) == 1
+
+    # suggested-category filter: SWIGGY gets a dictionary suggestion
+    # (Dining), the other two don't match anything in the dictionary
+    dining_rows = get("/api/queue?suggested=Dining")["rows"]
+    assert len(dining_rows) == 1 and dining_rows[0]["merchant"] == "SWIGGY DINER"
+    none_rows = get("/api/queue?suggested=__none__")["rows"]
+    assert len(none_rows) == 2
+    assert all(r["category"] in (None, "") for r in none_rows)
+    assert any("RANDOM UNKNOWN" in r["raw"] for r in none_rows)
+    assert any("UNMAPPED MART" in r["raw"] for r in none_rows)
+
+    # combining filters
+    combined = get("/api/queue?month=2026-06&q=SWIGGY")["rows"]
+    assert len(combined) == 1
+
+    # months/suggestions lists are returned for populating the dropdowns
+    full = get("/api/queue")
+    assert "2026-07" in full["months"] and "2026-06" in full["months"]
+    assert isinstance(full["suggestions"], list)
+    srv.shutdown()
+
+
 def test_web_bulk_confirm(tmp_path):
     """POST /api/confirm with `ids` (plural) assigns one category to several
     transactions in one request — the review page's bulk-select feature."""
