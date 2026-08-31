@@ -167,12 +167,22 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _transactions(self, q):
+        # Same filter surface as /api/queue (month, q, plus a category
+        # filter — the sentinel "__none__" here means "no category
+        # assigned yet", mirroring queue's "no suggestion" case) — the
+        # ledger page needs the same search/filter a large review queue
+        # needs, once thousands of already-classified rows pile up.
         month, needle = q.get("month", ""), q.get("q", "").upper()
+        category = q.get("category", "")
+        all_txns = self.store.all_transactions()
         rows = []
-        for t in sorted(self.store.all_transactions(),
-                        key=lambda x: x.date, reverse=True):
+        for t in sorted(all_txns, key=lambda x: x.date, reverse=True):
             iso = t.date.isoformat()
             if month and not iso.startswith(month):
+                continue
+            if category == "__none__" and t.category:
+                continue
+            if category and category != "__none__" and t.category != category:
                 continue
             hay = f"{t.merchant_norm} {t.payee_handle} {t.category} " \
                   f"{t.description_raw}".upper()
@@ -181,9 +191,9 @@ class Handler(BaseHTTPRequestHandler):
             rows.append(self._row(t))
             if len(rows) >= 300:
                 break
-        months = sorted({t.date.isoformat()[:7]
-                         for t in self.store.all_transactions()}, reverse=True)
-        return {"rows": rows, "months": months}
+        months = sorted({t.date.isoformat()[:7] for t in all_txns}, reverse=True)
+        categories = sorted({t.category for t in all_txns if t.category})
+        return {"rows": rows, "months": months, "categories": categories}
 
     def _queue(self, q):
         # Same param names as /api/transactions (month, q) for a consistent

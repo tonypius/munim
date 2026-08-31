@@ -356,6 +356,61 @@ def test_web_queue_search_and_filters(tmp_path):
     srv.shutdown()
 
 
+def test_web_transactions_category_filter_and_list(tmp_path):
+    """The transactions ("ledger") page's search/filter surface should
+    match the review page's: /api/transactions already had month + q, this
+    adds a `category` filter (an exact category name, or the sentinel
+    "__none__" for rows with no category at all yet) plus a `categories`
+    list in the response for populating that filter's dropdown — same
+    shape as /api/queue's `suggested` + `suggestions`."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Groceries", "Other"])
+    txns = [
+        Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY DINER@okaxis-999912345001",
+                    category="Dining", status=Status.CONFIRMED),
+        Transaction(date="2026-07-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-BIG BAZAAR MART@okaxis-999912345002",
+                    category="Groceries", status=Status.CONFIRMED),
+        Transaction(date="2026-07-02", amount=300, direction=Direction.DEBIT,
+                    description_raw="UPI-RANDOM UNKNOWN CO@okaxis-999912345003"),
+    ]
+    store.upsert_transactions(txns)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    # category filter: exact match
+    dining_rows = get("/api/transactions?category=Dining")["rows"]
+    assert len(dining_rows) == 1 and "SWIGGY" in dining_rows[0]["raw"]
+
+    # __none__ sentinel: rows with no category assigned yet
+    none_rows = get("/api/transactions?category=__none__")["rows"]
+    assert len(none_rows) == 1
+    assert "RANDOM UNKNOWN" in none_rows[0]["raw"]
+
+    # combining with the existing month/q filters
+    combined = get("/api/transactions?category=Groceries&month=2026-07")["rows"]
+    assert len(combined) == 1 and "BIG BAZAAR" in combined[0]["raw"]
+
+    # categories list returned for populating the filter dropdown
+    full = get("/api/transactions")
+    assert set(full["categories"]) == {"Dining", "Groceries"}
+    srv.shutdown()
+
+
 def test_web_bulk_confirm(tmp_path):
     """POST /api/confirm with `ids` (plural) assigns one category to several
     transactions in one request — the review page's bulk-select feature."""

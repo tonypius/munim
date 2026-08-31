@@ -155,6 +155,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <h2>The ledger</h2>
   <div class="controls">
     <select id="fMonth"><option value="">All months</option></select>
+    <select id="fCategory"><option value="">All heads</option><option value="__none__">No head</option></select>
     <input id="fSearch" placeholder="Search merchant, category, raw text" size="34">
   </div>
   <div id="txnBody"></div>
@@ -315,10 +316,14 @@ $("#reviewBody").addEventListener("click",async e=>{
 
 /* transactions */
 async function transactions(){
-  const month=$("#fMonth").value,q=$("#fSearch").value;
-  const d=await api(`/api/transactions?month=${month}&q=${encodeURIComponent(q)}`);
+  const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value;
+  const params=new URLSearchParams({month,q,category});
+  const d=await api(`/api/transactions?${params}`);
   if($("#fMonth").options.length===1)
     d.months.forEach(m=>$("#fMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
+  if($("#fCategory").options.length===2)
+    d.categories.forEach(c=>$("#fCategory")
+      .insertAdjacentHTML("beforeend",`<option value="${esc(c)}">${esc(c)}</option>`));
   $("#txnBody").innerHTML=d.rows.length?`<table><thead><tr>
     <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Head</th><th>Provenance</th><th>Account</th>
   </tr></thead><tbody>`+d.rows.map(r=>`<tr>
@@ -332,6 +337,7 @@ async function transactions(){
   :`<p class="empty">No entries match.</p>`;
 }
 $("#fMonth")?.addEventListener("change",transactions);
+$("#fCategory")?.addEventListener("change",transactions);
 let deb;$("#fSearch")?.addEventListener("input",()=>{clearTimeout(deb);deb=setTimeout(transactions,250)});
 
 /* categories */
