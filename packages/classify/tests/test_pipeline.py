@@ -202,6 +202,121 @@ def test_web_multiple_confirms_and_new_endpoints(tmp_path):
     srv.shutdown()
 
 
+def test_web_bulk_confirm(tmp_path):
+    """POST /api/confirm with `ids` (plural) assigns one category to several
+    transactions in one request — the review page's bulk-select feature."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Groceries", "Other"])
+    txns = [
+        Transaction(date="2026-07-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-LOCAL SHOP ONE@okaxis-999912345001"),
+        Transaction(date="2026-07-02", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-LOCAL SHOP TWO@okaxis-999912345002"),
+        Transaction(date="2026-07-03", amount=300, direction=Direction.DEBIT,
+                    description_raw="UPI-LOCAL SHOP THREE@okaxis-999912345003"),
+    ]
+    Pipeline(store).run(txns)
+    store.upsert_transactions(txns)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    queue = get("/api/queue")["rows"]
+    assert len(queue) == 3
+    ids = [row["id"] for row in queue[:2]]  # bulk-assign only the first two
+
+    req = urllib.request.Request(
+        base + "/api/confirm", method="POST",
+        data=json.dumps({"ids": ids, "category": "Dining"}).encode(),
+        headers={"Content-Type": "application/json"})
+    result = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert result["ok"] and result["confirmed"] == 2
+
+    remaining = get("/api/queue")["rows"]
+    assert len(remaining) == 1
+    assert remaining[0]["id"] not in ids
+
+    dash = get("/api/dashboard")
+    assert dash["top_categories"][0]["name"] == "Dining"
+    srv.shutdown()
+
+
+def test_web_bulk_confirm_reports_missing_ids(tmp_path):
+    """An id in the batch that doesn't exist (e.g. a stale client-side
+    selection) is reported, not silently dropped or a hard failure for the
+    whole batch."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Other"])
+    t = Transaction(date="2026-07-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-LOCAL SHOP ONE@okaxis-999912345001")
+    Pipeline(store).run([t])
+    store.upsert_transactions([t])
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    real_id = get("/api/queue")["rows"][0]["id"]
+    req = urllib.request.Request(
+        base + "/api/confirm", method="POST",
+        data=json.dumps({"ids": [real_id, "not-a-real-id"], "category": "Dining"}).encode(),
+        headers={"Content-Type": "application/json"})
+    result = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    assert result["ok"] and result["confirmed"] == 1
+    assert result["missing"] == ["not-a-real-id"]
+    srv.shutdown()
+
+
+def test_web_bulk_confirm_rejects_empty_ids_list(tmp_path):
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Dining"])
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/confirm", method="POST",
+        data=json.dumps({"ids": [], "category": "Dining"}).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=3)
+        assert False, "expected HTTPError for an empty ids list"
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+    srv.shutdown()
+
+
 def test_tree_resolves_and_validates():
     from munim.tree import default_tree, resolve, valid_path, root_of
     tree = default_tree(["Dining", "Income", "Transfers", "Investments"])

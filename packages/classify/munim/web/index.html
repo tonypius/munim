@@ -136,7 +136,13 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
 <section id="review" class="active">
   <h2>Waiting for your pen</h2>
   <p class="note">Confirm a merchant once and every identical entry across the
-  ledger is written up with it. People (blue) are only ever categorized by you.</p>
+  ledger is written up with it. People (blue) are only ever categorized by you.
+  Tick several rows and assign one head at once to avoid repeated clicks.</p>
+  <div class="controls" id="bulkBar" hidden>
+    <span id="bulkCount"></span>
+    <select id="bulkCat"></select>
+    <button id="bulkAssign" class="confirm">Assign to selected</button>
+  </div>
   <div id="reviewBody"></div>
 </section>
 
@@ -212,11 +218,17 @@ async function overview(){
 /* review */
 async function review(){
   const {rows}=await api("/api/queue");
-  if(!rows.length){$("#reviewBody").innerHTML=`<p class="empty">Queue is empty — the munim rests.</p>`;return}
+  if(!rows.length){
+    $("#reviewBody").innerHTML=`<p class="empty">Queue is empty — the munim rests.</p>`;
+    $("#bulkBar").hidden=true;
+    return;
+  }
   const opts=cat=>CATS.map(c=>`<option ${c===cat?"selected":""}>${esc(c)}</option>`).join("");
   $("#reviewBody").innerHTML=`<table><thead><tr>
+    <th><input type="checkbox" id="selectAll" title="Select all"></th>
     <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Suggested</th><th>Head</th><th></th>
   </tr></thead><tbody>`+rows.map(r=>`<tr data-id="${r.id}">
+    <td><input type="checkbox" class="rowSel" value="${r.id}"></td>
     <td class="num">${r.date}</td>
     <td><div class="merchant">${esc(r.merchant)||"—"} ${statusTag(r)}</div><div class="raw">${esc(r.raw)}</div></td>
     ${amountCell(r)}
@@ -224,7 +236,42 @@ async function review(){
     <td><select>${opts(r.category)}</select></td>
     <td><button class="confirm">Confirm</button></td>
   </tr>`).join("")+`</tbody></table>`;
+  $("#bulkCat").innerHTML=opts("");
+  updateBulkBar();
 }
+function updateBulkBar(){
+  const n=document.querySelectorAll("#reviewBody .rowSel:checked").length;
+  $("#bulkBar").hidden=n===0;
+  $("#bulkCount").textContent=n===1?"1 selected":`${n} selected`;
+}
+/* Selection: delegated on the stable #reviewBody container, same reason
+   as the confirm-button listener below — checkboxes are recreated on
+   every review() render, a listener attached to them directly would be
+   gone after the first refresh. */
+$("#reviewBody").addEventListener("change",e=>{
+  if(e.target.id==="selectAll"){
+    document.querySelectorAll("#reviewBody .rowSel")
+      .forEach(cb=>cb.checked=e.target.checked);
+  }
+  updateBulkBar();
+});
+$("#bulkAssign").addEventListener("click",async()=>{
+  const ids=[...document.querySelectorAll("#reviewBody .rowSel:checked")].map(cb=>cb.value);
+  if(!ids.length)return;
+  const category=$("#bulkCat").value;
+  const btn=$("#bulkAssign");const orig=btn.textContent;
+  btn.disabled=true;btn.textContent="…";
+  try{
+    await api("/api/confirm",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ids,category})});
+    await overview();await review();
+  }catch(err){
+    alert("Bulk assign failed: "+err.message);
+  }finally{
+    btn.disabled=false;btn.textContent=orig;
+  }
+});
 /* Confirm handling: ONE delegated listener on the stable container,
    attached at startup. (v0.1.1 fix: the old listener used the self-removing 'once'
    option, so only the first confirm worked. Never again.) */

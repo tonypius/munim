@@ -77,16 +77,55 @@ class Handler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", 0))
         data = json.loads(self.rfile.read(length) or b"{}")
-        txn_id, category = data.get("id"), data.get("category")
+        category = data.get("category")
         cats = self.store.get_config("categories", [])
-        if not txn_id or category not in cats:
-            self._send({"error": "need id and a valid category"}, status=400)
+        if category not in cats:
+            self._send({"error": "need id/ids and a valid category"}, status=400)
             return
-        t = self.store.get_transaction(txn_id)
-        if t is None:
+
+        ids = data.get("ids")
+        if ids is not None:
+            # Bulk path: the review page's select-several-then-assign-one-
+            # category action. Each id is confirmed with the same sequence
+            # as the single-id path (log, remember, propagate) — a missing
+            # id (e.g. a stale client-side selection) is reported, not a
+            # hard failure for the whole batch.
+            if not isinstance(ids, list) or not ids:
+                self._send({"error": "ids must be a non-empty list"}, status=400)
+                return
+            confirmed = 0
+            propagated_total = 0
+            missing = []
+            for txn_id in ids:
+                propagated = self._confirm_one(txn_id, category)
+                if propagated is None:
+                    missing.append(txn_id)
+                    continue
+                confirmed += 1
+                propagated_total += propagated
+            self._send({"ok": True, "confirmed": confirmed,
+                       "propagated": propagated_total, "missing": missing})
+            return
+
+        txn_id = data.get("id")
+        if not txn_id:
+            self._send({"error": "need id/ids and a valid category"}, status=400)
+            return
+        propagated = self._confirm_one(txn_id, category)
+        if propagated is None:
             self._send({"error": "unknown transaction"}, status=404)
             return
-        # Same sequence as `munim review` confirm: log, remember, propagate
+        self._send({"ok": True, "propagated": propagated})
+
+    def _confirm_one(self, txn_id, category):
+        """Same sequence as `munim review` confirm: log, remember,
+        propagate. Returns the propagated count, or None if txn_id doesn't
+        exist (a transaction resolved earlier in the same batch by another
+        id's propagate() is still found here and simply re-confirmed with
+        the same category — harmless, not an error)."""
+        t = self.store.get_transaction(txn_id)
+        if t is None:
+            return None
         self.store.log_correction(t, category)
         propagated = 0
         if t.payee_handle:
@@ -101,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         t.stage = Stage.USER
         t.status = Status.CONFIRMED
         self.store.update_transaction(t)
-        self._send({"ok": True, "propagated": propagated})
+        return propagated
 
     # ---- data assembly --------------------------------------------------
     def _overview(self):
