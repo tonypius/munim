@@ -189,6 +189,14 @@ def review(limit: int = typer.Option(50, help="Max items this session")):
         if key[1]:
             session_done.add(key)
         t.category = final
+        # is_transfer must track the category, not just the structural
+        # auto-detector: a transaction the auto-detector couldn't pair
+        # (e.g. a credit-card bill payment where only the card's own
+        # statement is imported) still needs this set when confirmed as
+        # "Transfers" here — reports/dashboard check is_transfer, not the
+        # category string. Also clears it when correcting a mis-flagged
+        # transfer to a real category.
+        t.is_transfer = final == "Transfers"
         t.stage = Stage.USER if choice else t.stage
         t.status = Status.CONFIRMED
         store.update_transaction(t)
@@ -759,10 +767,13 @@ def relabel(pattern: str, category: str):
     kind = kinds[0]["kind"] if kinds else "merchant"
     store.remember(pattern, category, kind=kind)
     col = "payee_handle" if kind == "payee" else "merchant_norm"
+    # is_transfer must track the category, not just the structural
+    # auto-detector — see the same note in store.propagate().
+    is_transfer = 1 if category == "Transfers" else 0
     n = store.db.execute(
         f"UPDATE transactions SET category=?, status='confirmed', "
-        f"stage='user', confidence=1.0 WHERE {col}=?",
-        (category, pattern)).rowcount
+        f"stage='user', confidence=1.0, is_transfer=? WHERE {col}=?",
+        (category, is_transfer, pattern)).rowcount
     store.db.commit()
     console.print(f"[green]{pattern} → {category}[/green]: {n} transactions "
                   f"updated, memory rule replaced.")

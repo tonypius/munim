@@ -49,6 +49,93 @@ def test_cc_bill_payment_is_transfer_not_spending(tmp_path):
     assert t.is_transfer and t.category == "Transfers"
 
 
+def test_web_confirm_as_transfers_sets_is_transfer(tmp_path):
+    """A transaction the structural detector couldn't auto-pair (e.g. a
+    credit-card bill payment where only the card's statement is imported,
+    not the source bank account) still needs is_transfer=True when the
+    user manually confirms it as "Transfers" via the review page —
+    category alone isn't what reports/dashboard check, is_transfer is.
+    Without this, a manually-confirmed transfer is silently double-
+    counted as income or spending."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Transfers", "Other"])
+    t = Transaction(date="2026-06-05", amount=130643, direction=Direction.CREDIT,
+                    description_raw="NETBANKING TRANSFER (Ref# 00000000000510015695123)")
+    Pipeline(store).run([t])
+    store.upsert_transactions([t])
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/confirm", method="POST",
+        data=json.dumps({"id": t.id, "category": "Transfers"}).encode(),
+        headers={"Content-Type": "application/json"})
+    assert json.loads(urllib.request.urlopen(req, timeout=3).read())["ok"]
+
+    reloaded = store.get_transaction(t.id)
+    assert reloaded.category == "Transfers"
+    assert reloaded.is_transfer is True
+    srv.shutdown()
+
+
+def test_propagate_sets_is_transfer_for_transfers_category(tmp_path):
+    """propagate() cascades a confirmed category to every other
+    unconfirmed transaction with the identical merchant string — when
+    that category is "Transfers", the cascaded rows need is_transfer=True
+    too, not just the one row the user directly clicked confirm on."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("categories", ["Transfers", "Other"])
+    txns = [
+        Transaction(date="2026-06-01", amount=1000, direction=Direction.CREDIT,
+                    description_raw="NETBANKING TRANSFER (Ref# A)"),
+        Transaction(date="2026-07-01", amount=2000, direction=Direction.CREDIT,
+                    description_raw="NETBANKING TRANSFER (Ref# B)"),
+    ]
+    store.upsert_transactions(txns)
+    # both txns normalize to the same merchant_norm ("NETBANKING TRANSFER"),
+    # so propagating from the first must reach the second.
+    assert txns[0].merchant_norm == txns[1].merchant_norm
+
+    n = store.propagate(txns[0].merchant_norm, "Transfers", "merchant",
+                        exclude_id=txns[0].id)
+    assert n == 1
+    other = store.get_transaction(txns[1].id)
+    assert other.category == "Transfers"
+    assert other.is_transfer is True
+    assert other.status == Status.CONFIRMED
+
+
+def test_propagate_clears_is_transfer_for_non_transfer_category(tmp_path):
+    """The inverse must also hold: propagating a correction AWAY from
+    Transfers to a real spending category must clear is_transfer, or a
+    previously-mis-flagged transfer would keep being excluded from
+    spending totals after the user explicitly fixed its category."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("categories", ["Transfers", "Shopping"])
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="SOME STORE XYZ", is_transfer=True,
+                    category="Transfers")
+    store.upsert_transactions([t])
+
+    n = store.propagate(t.merchant_norm, "Shopping", "merchant", exclude_id="nonexistent")
+    assert n == 1
+    reloaded = store.get_transaction(t.id)
+    assert reloaded.category == "Shopping"
+    assert reloaded.is_transfer is False
+
+
 def test_predictions_never_enter_memory_without_confirmation(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("region", "in")

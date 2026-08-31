@@ -174,11 +174,18 @@ class Store:
         `munim reclassify` so the user still sees anything ambiguous.
         """
         col = "payee_handle" if kind == "payee" else "merchant_norm"
+        # is_transfer must track the category, not just the structural
+        # auto-detector's own pass: a transaction the auto-detector
+        # couldn't pair (e.g. a credit-card bill payment where only the
+        # card's own statement is imported) still needs is_transfer=True
+        # once the user confirms "Transfers" here — reports/dashboard
+        # check is_transfer, not the category string.
+        is_transfer = 1 if category == "Transfers" else 0
         cur = self.db.execute(
             f"UPDATE transactions SET category=?, status='confirmed', "
-            f"stage='memory_exact', confidence=1.0 "
+            f"stage='memory_exact', confidence=1.0, is_transfer=? "
             f"WHERE {col}=? AND status != 'confirmed' AND id != ?",
-            (category, pattern, exclude_id),
+            (category, is_transfer, pattern, exclude_id),
         )
         self.db.commit()
         return cur.rowcount

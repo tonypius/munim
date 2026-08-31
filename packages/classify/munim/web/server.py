@@ -137,6 +137,14 @@ class Handler(BaseHTTPRequestHandler):
             propagated = self.store.propagate(t.merchant_norm, category,
                                               "merchant", t.id)
         t.category = category
+        # is_transfer must track the category, not just the structural
+        # auto-detector: a transaction the auto-detector couldn't pair
+        # (e.g. a credit-card bill payment where only the card's own
+        # statement is imported) still needs this set when the user
+        # confirms "Transfers" here — reports/dashboard check
+        # is_transfer, not the category string. Also clears it when a
+        # user corrects a mis-flagged transfer to a real category.
+        t.is_transfer = category == "Transfers"
         t.stage = Stage.USER
         t.status = Status.CONFIRMED
         self.store.update_transaction(t)
