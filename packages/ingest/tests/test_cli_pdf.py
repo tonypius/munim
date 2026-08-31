@@ -329,6 +329,74 @@ def test_pdf_extract_bank_hdfc_strips_time_component_from_dates(tmp_path):
     assert "12:55:34" not in lines[1]
 
 
+def test_pdf_extract_bank_hdfc_auto_detects_newer_layout(tmp_path):
+    """The newer HDFC template (post card-upgrade, same account) never
+    forms a ruled table — filter_transaction_rows keeps single-column
+    lines instead of the older 5-column shape. --bank hdfc must detect
+    this from row shape and dispatch to the v2 parser automatically,
+    without the user needing a different flag."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [
+        ["21/10/2025| 08:30 NETFLIX DI SIMUMBAI C 649.00 l"],
+        ["10/11/2025| 07:11 AUTOPAY THANK YOU (Ref# X) + C 45,248.00 l"],
+    ]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Date,Transaction Description,Amount (in Rs.)"
+    assert lines[1] == "21/10/2025,NETFLIX DI SIMUMBAI,-649.00"
+    assert lines[2] == "10/11/2025,AUTOPAY THANK YOU (Ref# X),45248.00"
+
+
+def test_pdf_extract_bank_hdfc_v2_message_describes_structural_detection(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["21/10/2025| 08:30 NETFLIX DI SIMUMBAI C 649.00 l"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    assert "newer" in result.output.lower()
+    # Must not claim the OLD format's convention was applied.
+    assert "positive-magnitude" not in result.output.lower()
+
+
+def test_pdf_extract_bank_hdfc_v2_drops_unparseable_rows_silently_from_output(tmp_path):
+    """Rows filter_transaction_rows kept (date-shaped first cell) but that
+    still don't match the full transaction-line pattern must not corrupt
+    the uniform 3-column output — they're dropped, not left malformed."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [
+        ["21/10/2025| 08:30 NETFLIX DI SIMUMBAI C 649.00 l"],
+        ["21/10/2025 this looks date-shaped but has no real transaction body"],
+    ]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    lines = out_path.read_text().splitlines()
+    assert len(lines) == 2  # header + the one real transaction only
+
+
 def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
     pdf_path = tmp_path / "statement.pdf"
     pdf_path.write_bytes(b"%PDF-fake")

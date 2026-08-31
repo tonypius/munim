@@ -14,13 +14,25 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
-from . import hdfc_credit_card
+from . import hdfc_credit_card, hdfc_credit_card_v2
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
 from .pdf_extract import PdfPasswordError, extract_rows, filter_transaction_rows, open_pdf
 
+def _is_hdfc_v2_layout(rows):
+    """The newer HDFC template (a card-number upgrade on the same
+    account, statements from ~Sep 2025 on) never forms a ruled table, so
+    filter_transaction_rows keeps single-column lines instead of the
+    older format's 5-column shape — that row width is what distinguishes
+    the two layouts after filtering, without the user needing a separate
+    flag for each."""
+    return bool(rows) and len(rows[0]) == 1
+
+
 def _normalize_hdfc_credit_card(rows):
+    if _is_hdfc_v2_layout(rows):
+        return hdfc_credit_card_v2.normalize_hdfc_v2_rows(rows)
     return normalize_hdfc_credit_card_dates(normalize_hdfc_credit_card_amounts(rows))
 
 
@@ -275,13 +287,29 @@ def pdf_extract_cmd(
                 f"out {dropped} non-transaction row(s) (headers, summaries, "
                 "blanks). Spot-check the output — pass --raw to see "
                 "everything unfiltered if this looks wrong.")
+            is_v2 = bank == "hdfc" and _is_hdfc_v2_layout(final_rows)
             if bank is not None:
                 final_rows = BANK_NORMALIZERS[bank](final_rows)
-                console.print(
-                    f"Applied {escape(bank)} normalization (amount: "
-                    "positive-magnitude + Cr/Dr suffix → munim's signed "
-                    "convention; date: strips a time component and any "
-                    "stray leading text down to a bare date).")
+                if is_v2:
+                    console.print(
+                        f"Applied {escape(bank)} normalization for the newer "
+                        "statement layout (no Cr/Dr suffix on this template — "
+                        "direction is inferred structurally: a bare '+' "
+                        "immediately before the trailing amount marks a "
+                        "credit, everything else defaults to debit).")
+                else:
+                    console.print(
+                        f"Applied {escape(bank)} normalization (amount: "
+                        "positive-magnitude + Cr/Dr suffix → munim's signed "
+                        "convention; date: strips a time component and any "
+                        "stray leading text down to a bare date).")
+                if not final_rows:
+                    console.print(
+                        f"[yellow]{escape(bank)} normalization left 0 "
+                        "transaction row(s) — every extracted line was "
+                        "dropped as unparseable. Re-run with --raw to see "
+                        "everything unfiltered.[/yellow]")
+                    raise typer.Exit(1)
 
             # munim import's column-mapping wizard treats row 1 as a
             # header (csv.DictReader) — filter_transaction_rows's output
@@ -290,11 +318,14 @@ def pdf_extract_cmd(
             # noise), so without this, the wizard would silently treat
             # the first real transaction as the header and drop it. Use
             # HDFC's real, known column names when the shape matches what
-            # --bank hdfc expects; otherwise a generic numbered header —
-            # honest about not knowing the semantic meaning of a column
-            # for a bank this tool hasn't verified.
+            # --bank hdfc expects for either known layout; otherwise a
+            # generic numbered header — honest about not knowing the
+            # semantic meaning of a column for a bank this tool hasn't
+            # verified.
             width = len(final_rows[0])
-            if bank == "hdfc" and width == len(hdfc_credit_card.HEADER_ROW):
+            if bank == "hdfc" and is_v2:
+                header_row = hdfc_credit_card_v2.HEADER_ROW
+            elif bank == "hdfc" and width == len(hdfc_credit_card.HEADER_ROW):
                 header_row = hdfc_credit_card.HEADER_ROW
             else:
                 header_row = [f"Column {i + 1}" for i in range(width)]
