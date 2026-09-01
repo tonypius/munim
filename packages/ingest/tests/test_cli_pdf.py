@@ -397,6 +397,39 @@ def test_pdf_extract_bank_hdfc_v2_drops_unparseable_rows_silently_from_output(tm
     assert len(lines) == 2  # header + the one real transaction only
 
 
+def test_pdf_extract_bank_hdfc_bank_explodes_mega_rows(tmp_path):
+    """--bank hdfc-bank explodes a page's merged multi-transaction row
+    (Date/Narration/Withdrawals/Deposits each newline-joined within one
+    cell) back into one row per real transaction, with its own header
+    and no direction-inference message (unlike --bank hdfc)."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [[
+        "01/07/2026\n02/07/2026",
+        "UPI-A MERCHANT-a@okaxis-SBIN0001-111-food Value Dt 01/07/2026 Ref 111\n"
+        "UPI-B MERCHANT-b@okaxis-SBIN0002-222-taxi Value Dt 02/07/2026 Ref 222",
+        "100.00\n0.00",
+        "0.00\n500.00",
+        "900.00\n1400.00",
+    ]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--bank", "hdfc-bank"])
+
+    assert result.exit_code == 0, result.output
+    assert "direction is inferred" not in result.output.lower()
+    lines = out_path.read_text().splitlines()
+    assert lines[0] == "Date,Narration,Amount"
+    assert len(lines) == 3
+    assert lines[1].startswith("01/07/2026,") and lines[1].endswith(",-100.00")
+    assert lines[2].startswith("02/07/2026,") and lines[2].endswith(",500.00")
+
+
 def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
     pdf_path = tmp_path / "statement.pdf"
     pdf_path.write_bytes(b"%PDF-fake")

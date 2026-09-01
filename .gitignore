@@ -9,3 +9,4 @@ venv/
 *.db
 .munim/
 .claude/worktrees/
+.DS_Store

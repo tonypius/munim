@@ -14,7 +14,7 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
-from . import hdfc_credit_card, hdfc_credit_card_v2
+from . import hdfc_bank_account, hdfc_credit_card, hdfc_credit_card_v2
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -42,6 +42,7 @@ def _normalize_hdfc_credit_card(rows):
 # bank's statement layout that don't generalize to others.
 BANK_NORMALIZERS = {
     "hdfc": _normalize_hdfc_credit_card,
+    "hdfc-bank": hdfc_bank_account.normalize_hdfc_bank_account_rows,
 }
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
@@ -236,10 +237,13 @@ def pdf_extract_cmd(
     shape whose first cell looks like a date, which is what a real
     transaction row looks like; pass --raw to skip this and get everything
     extracted, unfiltered. --bank hdfc additionally normalizes HDFC credit
-    card statements' amount convention (positive magnitude + a trailing Cr
-    suffix for credits) into munim's expected signed-amount format. Run
-    `munim import` on the output next to map columns and classify, same as
-    any bank CSV export.
+    card statements' amount convention (auto-detecting either the older
+    positive-magnitude-plus-Cr/Dr-suffix layout or the newer structural-
+    direction layout) into munim's expected signed-amount format.
+    --bank hdfc-bank does the same for HDFC savings/current account
+    statements, exploding each page's merged multi-transaction row back
+    into one row per transaction. Run `munim import` on the output next
+    to map columns and classify, same as any bank CSV export.
     """
     if bank is not None and bank not in BANK_NORMALIZERS:
         console.print(
@@ -297,6 +301,13 @@ def pdf_extract_cmd(
                         "direction is inferred structurally: a bare '+' "
                         "immediately before the trailing amount marks a "
                         "credit, everything else defaults to debit).")
+                elif bank == "hdfc-bank":
+                    console.print(
+                        f"Applied {escape(bank)} normalization (each page's "
+                        "merged Date/Narration/Withdrawals/Deposits row "
+                        "exploded back into one transaction per row; no "
+                        "direction inference needed — Withdrawals and "
+                        "Deposits are already separate columns).")
                 else:
                     console.print(
                         f"Applied {escape(bank)} normalization (amount: "
@@ -327,6 +338,8 @@ def pdf_extract_cmd(
                 header_row = hdfc_credit_card_v2.HEADER_ROW
             elif bank == "hdfc" and width == len(hdfc_credit_card.HEADER_ROW):
                 header_row = hdfc_credit_card.HEADER_ROW
+            elif bank == "hdfc-bank":
+                header_row = hdfc_bank_account.HEADER_ROW
             else:
                 header_row = [f"Column {i + 1}" for i in range(width)]
             final_rows = [header_row, *final_rows]

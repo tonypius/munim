@@ -1,0 +1,22 @@
+bank: hdfc-bank
+# NOT narrowed to the exact sender address (hdfcbanksmartstatement@
+# hdfcbank.bank.in) deliberately — a real diagnostic run (2026-09-01)
+# showed different months' statements arrive from different exact
+# addresses under this same domain; narrowing to one address dropped
+# 10 of 18 real statements. The bare domain list (shared with
+# packs/hdfc.yaml's credit card pack) plus the subject_keywords filter
+# below is what actually matched all 18 known statements.
+from_domains:
+  - hdfcbank.bank.in
+  - hdfcbank.net
+  - hdfcbank.com
+attachment_extensions:
+  - .csv
+  - .pdf
+# Confirmed 2026-09-01 against a real subject line: "HDFC Bank Combined
+# Email Statement for June-2026" — the month varies, "Combined Email
+# Statement" doesn't. Distinct from packs/hdfc.yaml's "Credit Card
+# Statement" keyword — this is the savings/current account statement,
+# a different document with a different sender/subject pattern.
+subject_keywords:
+  - Combined Email Statement
