@@ -65,6 +65,18 @@ def extract_rows(pdf: pdfplumber.PDF) -> list[list[str | None]]:
     return all_lines
 
 
+def extract_all_text(pdf: pdfplumber.PDF) -> str:
+    """Every page's plain text, joined in order. Deliberately separate
+    from extract_rows(): a statement can carry information outside its
+    detected transaction table entirely — HDFC's own declared statement
+    period ("Statement From : DATE To : DATE") sits in ordinary page
+    text alongside the table, not inside any cell of it — so
+    extract_rows()'s table-only output never sees it once a page has any
+    ruled table at all.
+    """
+    return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+
 def filter_transaction_rows(
     rows: list[list[str | None]],
 ) -> list[list[str | None]]:

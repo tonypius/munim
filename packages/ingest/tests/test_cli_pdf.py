@@ -430,6 +430,89 @@ def test_pdf_extract_bank_hdfc_bank_explodes_mega_rows(tmp_path):
     assert lines[2].startswith("02/07/2026,") and lines[2].endswith(",500.00")
 
 
+def test_pdf_extract_bank_hdfc_bank_reports_calendar_aligned_period(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/12/2025", "A Value Dt 01/12/2025 Ref 1", "100.00", "0.00", "900.00"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows), \
+         patch("munim_ingest.cli.extract_all_text",
+               return_value="Statement From : 01/12/2025 To 31/12/2025"):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--bank", "hdfc-bank"])
+
+    assert result.exit_code == 0, result.output
+    assert "Statement period: 01/12/2025 → 31/12/2025." in result.output
+    assert "mid-month" not in result.output.lower()
+
+
+def test_pdf_extract_bank_hdfc_bank_warns_about_mid_month_start(tmp_path):
+    """Real finding: a statement whose declared period starts mid-month
+    (not the 1st) silently excludes the days before it — a bank-side
+    billing-cycle quirk, not an extraction bug, but invisible unless
+    surfaced. Confirmed against a real November 2025 statement that
+    started 03/11 instead of 01/11, missing 2 real transactions until
+    caught by cross-checking a bank Excel export."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["06/11/2025", "A Value Dt 06/11/2025 Ref 1", "100.00", "0.00", "900.00"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows), \
+         patch("munim_ingest.cli.extract_all_text",
+               return_value="Statement From : 03/11/2025 To 30/11/2025"):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--bank", "hdfc-bank"])
+
+    assert result.exit_code == 0, result.output
+    assert "starts mid-month" in result.output.lower()
+    assert "03/11/2025" in result.output and "30/11/2025" in result.output
+
+
+def test_pdf_extract_bank_hdfc_bank_no_period_found_prints_nothing_extra(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [["01/12/2025", "A Value Dt 01/12/2025 Ref 1", "100.00", "0.00", "900.00"]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows), \
+         patch("munim_ingest.cli.extract_all_text", return_value="no period text here"):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--bank", "hdfc-bank"])
+
+    assert result.exit_code == 0, result.output
+    assert "Statement period" not in result.output
+
+
+def test_pdf_extract_bank_hdfc_credit_card_does_not_call_extract_all_text(tmp_path):
+    """extract_all_text scans every page's text — only worth the cost
+    for --bank hdfc-bank, which is the only layout known to carry the
+    statement-period text at all."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    raw_rows = [["01/01/2024", "GROCERY STORE", None, "100.00", None]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows), \
+         patch("munim_ingest.cli.extract_all_text") as mock_extract_text:
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--bank", "hdfc"])
+
+    assert result.exit_code == 0, result.output
+    mock_extract_text.assert_not_called()
+
+
 def test_pdf_extract_bank_hdfc_bank_warns_about_unparseable_pages(tmp_path):
     """A version of hdfc_bank_account's parser once dropped a whole page
     silently on any narration-alignment failure, with no way for the

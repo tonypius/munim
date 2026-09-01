@@ -18,7 +18,9 @@ from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
-from .pdf_extract import PdfPasswordError, extract_rows, filter_transaction_rows, open_pdf
+from .pdf_extract import (
+    PdfPasswordError, extract_all_text, extract_rows, filter_transaction_rows, open_pdf,
+)
 
 def _is_hdfc_v2_layout(rows):
     """The newer HDFC template (a card-number upgrade on the same
@@ -279,6 +281,12 @@ def pdf_extract_cmd(
     try:
         with open_pdf(file, password) as pdf:
             rows = extract_rows(pdf)
+            # Only hdfc-bank statements are known to carry this, and only
+            # while the PDF is still open — captured here so it can still
+            # be reported after the `with` block closes it.
+            statement_period = (
+                hdfc_bank_account.find_statement_period(extract_all_text(pdf))
+                if bank == "hdfc-bank" else None)
 
         if not rows:
             console.print("[yellow]No text or tables found in this PDF.[/yellow]")
@@ -335,6 +343,26 @@ def pdf_extract_cmd(
                         "exploded back into one transaction per row; no "
                         "direction inference needed — Withdrawals and "
                         "Deposits are already separate columns).")
+                    if statement_period:
+                        from_date, to_date = statement_period
+                        # HDFC's own statement period isn't guaranteed to
+                        # start on the 1st of its named month — a real
+                        # statement has been seen starting 2 days in,
+                        # silently missing those days from a naive
+                        # "one PDF per calendar month" pull. Flag it
+                        # rather than let it pass unnoticed.
+                        if from_date[:2] == "01":
+                            console.print(
+                                f"Statement period: {from_date} → {to_date}.")
+                        else:
+                            console.print(
+                                f"[yellow]Statement period: {from_date} → "
+                                f"{to_date} — starts mid-month, not on the "
+                                "1st. If the previous statement you have "
+                                f"doesn't end the day before ({from_date}), "
+                                "some days are missing between them and "
+                                "need a different source (e.g. an Excel "
+                                "export) to fill.[/yellow]")
                 else:
                     console.print(
                         f"Applied {escape(bank)} normalization (amount: "

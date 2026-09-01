@@ -59,6 +59,28 @@ _NARRATION_SPLIT_RE = re.compile(
 
 HEADER_ROW = ["Date", "Narration", "Amount"]
 
+# Not inside the transaction table at all — this sits in ordinary page
+# text (see extract_all_text in pdf_extract.py), typically on the page
+# right before the table starts.
+_STATEMENT_PERIOD_RE = re.compile(
+    r"Statement\s+From\s*:\s*(\d{2}/\d{2}/\d{4})\s*To\s*(\d{2}/\d{2}/\d{4})",
+)
+
+
+def find_statement_period(text: str) -> tuple[str, str] | None:
+    """A statement's own declared "Statement From : DATE To : DATE"
+    period — surfaced so a period that doesn't start immediately after
+    the previous statement's end date is obvious before import, rather
+    than only discoverable after the fact. A real HDFC statement has been
+    seen with a period starting 2 days into its named month (a bank-side
+    billing-cycle quirk, not an extraction bug) — silently missing those
+    days from every "one PDF per calendar month" pull. Returns None if
+    the text has no such period (not every page carries it, and a
+    statement in an unrecognized future layout might not either).
+    """
+    match = _STATEMENT_PERIOD_RE.search(text)
+    return (match.group(1), match.group(2)) if match else None
+
 
 def _clean_narration(chunk: str) -> str:
     return re.sub(r"\s+", " ", chunk).strip()

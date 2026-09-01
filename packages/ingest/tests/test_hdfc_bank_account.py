@@ -19,6 +19,7 @@ transactions before writing this module.
 from munim_ingest.hdfc_bank_account import (
     HEADER_ROW,
     count_unparseable_pages,
+    find_statement_period,
     normalize_hdfc_bank_account_rows,
 )
 
@@ -192,6 +193,36 @@ def test_count_unparseable_pages_zero_when_all_pages_align():
     row2 = _mega_row(["02/07/2026"],
                       ["B Value Dt 02/07/2026 Ref 2"], ["0.00"], ["20.00"], ["110.00"])
     assert count_unparseable_pages([row1, row2]) == 0
+
+
+def test_find_statement_period_extracts_from_and_to_dates():
+    """Real finding (2026-09-02): a statement's own declared period can
+    start partway into its named month rather than on the 1st — one real
+    November 2025 statement was "Statement From : 03/11/2025 To
+    30/11/2025", silently missing Nov 1-2 from that PDF entirely (not an
+    extraction bug — those days genuinely aren't in this statement, they
+    belonged to whatever statement covered the days just before). Naively
+    assuming one PDF per calendar month gives full coverage caused 2 real
+    transactions to go missing until caught by cross-checking a bank
+    Excel export. Surfacing the declared period lets this be caught
+    immediately instead."""
+    text = ("Tony Pius Alapatt\nAccount Number : 50100130659482\n"
+            "Statement From : 03/11/2025 To 30/11/2025 Karnataka\n"
+            "Currency : INR 560078")
+    assert find_statement_period(text) == ("03/11/2025", "30/11/2025")
+
+
+def test_find_statement_period_calendar_aligned_case():
+    text = "Statement From : 01/12/2025 To 31/12/2025 Karnataka"
+    assert find_statement_period(text) == ("01/12/2025", "31/12/2025")
+
+
+def test_find_statement_period_not_found_returns_none():
+    assert find_statement_period("no period text here at all") is None
+
+
+def test_find_statement_period_empty_string_returns_none():
+    assert find_statement_period("") is None
 
 
 def test_count_unparseable_pages_counts_each_misaligned_page():

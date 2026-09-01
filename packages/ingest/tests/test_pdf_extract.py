@@ -1,6 +1,6 @@
 import pytest
 
-from munim_ingest.pdf_extract import PdfPasswordError, open_pdf
+from munim_ingest.pdf_extract import PdfPasswordError, extract_all_text, open_pdf
 
 from .pdf_fixtures import make_encrypted_pdf
 
@@ -38,3 +38,18 @@ def test_open_pdf_wrong_password_error_message_has_no_dangling_empty_reason(tmp_
     # str() (verified: PdfminerException(PDFPasswordIncorrect()) -> ""),
     # so the fallback reason must be substituted in.
     assert "incorrect password" in message.lower()
+
+
+def test_extract_all_text_joins_every_page(tmp_path):
+    """Plain page text (as opposed to extract_rows()'s table-only output
+    when any page has a table) — needed for content that lives outside
+    the detected transaction table entirely, like HDFC's own declared
+    "Statement From : DATE To : DATE" period, which sits in ordinary text
+    on the same page as the table but isn't part of it."""
+    pdf_path = tmp_path / "statement.pdf"
+    make_encrypted_pdf(pdf_path, password="testpw123",
+                        plain_text="Statement From : 01/12/2025 To 31/12/2025\nSecond line")
+    with open_pdf(pdf_path, "testpw123") as pdf:
+        text = extract_all_text(pdf)
+    assert "Statement From : 01/12/2025 To 31/12/2025" in text
+    assert "Second line" in text
