@@ -18,6 +18,7 @@ transactions before writing this module.
 """
 from munim_ingest.hdfc_bank_account import (
     HEADER_ROW,
+    count_unparseable_pages,
     normalize_hdfc_bank_account_rows,
 )
 
@@ -113,6 +114,52 @@ def test_multiple_mega_rows_all_produce_transactions():
     assert result[1][0] == "02/07/2026"
 
 
+def test_narration_with_no_ref_number_still_splits_correctly():
+    """Real extraction artifact (found 2026-09-01 comparing against a
+    bank-downloaded Excel export of the same month): interest-posting and
+    FD-transfer entries ('FD Redeem Interest...', 'FT -: FD A/C NO...',
+    'Interest debited till...') end with just 'Value Dt DATE' and no
+    trailing 'Ref <number>' at all — a regex that requires Ref failed to
+    match these, misaligning the narration-segment count against the
+    date count and silently dropping the ENTIRE page (all transactions
+    on it, not just the Ref-less ones) via the alignment guard. This was
+    the actual root cause of transactions missing from a real account:
+    47 of 355 transactions across 9 months, including one very large FD
+    redemption, all silently dropped this way with no warning."""
+    row = _mega_row(
+        ["03/08/2024", "03/08/2024", "04/08/2024"],
+        [
+            "FD Redeem Interest -50300775239247/2 Value Dt 03/08/2024",
+            "FT -: FD A/C NO 50300775239247 Value Dt 03/08/2024",
+            "UPI-FAISAL MOHAMMED SHAL-faisal@okicici-ICIC0001-42172 "
+            "Value Dt 04/08/2024 Ref 421729191704",
+        ],
+        ["0.00", "0.00", "0.00"],
+        ["1270.00", "600000.00", "2500.00"],
+        ["137075.47", "137075.47", "139325.47"])
+    result = normalize_hdfc_bank_account_rows([row])
+    assert len(result) == 3
+    assert result[0][2] == "1270.00"
+    assert result[1][2] == "600000.00"
+    assert result[1][1] == "FT -: FD A/C NO 50300775239247 Value Dt 03/08/2024"
+    assert result[2][2] == "2500.00"
+
+
+def test_narration_with_ref_number_unaffected_by_no_ref_support():
+    """Regression guard: making Ref optional must not cause a normal
+    Ref-bearing narration to stop matching early (greedy '?' should still
+    consume 'Ref <num>' when it's actually present right after
+    'Value Dt DATE')."""
+    row = _mega_row(
+        ["01/07/2026"],
+        ["UPI-SWIGGY-swiggy@okaxis-SBIN0001-618223321380-food "
+         "Value Dt 01/07/2026 Ref 618223321380"],
+        ["500.00"], ["0.00"], ["9500.00"])
+    result = normalize_hdfc_bank_account_rows([row])
+    assert result[0][1] == ("UPI-SWIGGY-swiggy@okaxis-SBIN0001-618223321380-food "
+                             "Value Dt 01/07/2026 Ref 618223321380")
+
+
 def test_misaligned_counts_are_skipped_not_guessed():
     """If the narration-segment count doesn't match the date count (an
     unexpected layout variant), the whole mega-row is dropped rather than
@@ -137,3 +184,22 @@ def test_empty_input_returns_empty():
 
 def test_header_row_shape():
     assert HEADER_ROW == ["Date", "Narration", "Amount"]
+
+
+def test_count_unparseable_pages_zero_when_all_pages_align():
+    row1 = _mega_row(["01/07/2026"],
+                      ["A Value Dt 01/07/2026 Ref 1"], ["10.00"], ["0.00"], ["90.00"])
+    row2 = _mega_row(["02/07/2026"],
+                      ["B Value Dt 02/07/2026 Ref 2"], ["0.00"], ["20.00"], ["110.00"])
+    assert count_unparseable_pages([row1, row2]) == 0
+
+
+def test_count_unparseable_pages_counts_each_misaligned_page():
+    good = _mega_row(["01/07/2026"],
+                      ["A Value Dt 01/07/2026 Ref 1"], ["10.00"], ["0.00"], ["90.00"])
+    bad = [
+        "01/07/2026\n02/07/2026",  # 2 dates
+        "Only one narration Value Dt 01/07/2026 Ref 1",  # 1 narration
+        "10.00\n20.00", "0.00\n0.00", "90.00\n70.00",
+    ]
+    assert count_unparseable_pages([good, bad, bad]) == 2

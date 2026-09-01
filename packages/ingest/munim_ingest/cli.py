@@ -14,7 +14,7 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
-from . import hdfc_bank_account, hdfc_credit_card, hdfc_credit_card_v2
+from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc_credit_card_v2
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -73,6 +73,21 @@ pdf_app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(pdf_app, name="pdf")
+
+excel_app = typer.Typer(
+    help="Extract bank statement Excel exports into CSV for `munim import`.",
+    # See the same note on gmail_app above: the real protection is the
+    # top-level `app`'s setting, this one is kept for explicitness only.
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(excel_app, name="excel")
+
+# Bank-specific Excel-export parsers, opted into via `excel extract --bank`.
+# Each is scoped to exactly one bank's known column layout — never applied
+# by default, same rationale as BANK_NORMALIZERS below.
+EXCEL_PARSERS = {
+    "hdfc-bank": hdfc_bank_account_excel.parse_hdfc_bank_excel,
+}
 
 DEFAULT_HOME = Path.home() / ".munim-ingest"
 
@@ -293,7 +308,19 @@ def pdf_extract_cmd(
                 "everything unfiltered if this looks wrong.")
             is_v2 = bank == "hdfc" and _is_hdfc_v2_layout(final_rows)
             if bank is not None:
+                pre_normalize_rows = final_rows
                 final_rows = BANK_NORMALIZERS[bank](final_rows)
+                if bank == "hdfc-bank":
+                    dropped_pages = hdfc_bank_account.count_unparseable_pages(
+                        pre_normalize_rows)
+                    if dropped_pages:
+                        console.print(
+                            f"[red]{dropped_pages} page(s) could not be "
+                            "parsed (an unrecognized narration format broke "
+                            "the alignment check) and every transaction on "
+                            "those pages was dropped. Re-run with --raw and "
+                            "inspect the output — this needs a parser fix, "
+                            "not a retry.[/red]")
                 if is_v2:
                     console.print(
                         f"Applied {escape(bank)} normalization for the newer "
@@ -361,6 +388,56 @@ def pdf_extract_cmd(
     row_count = len(final_rows) - (0 if raw else 1)  # exclude the prepended header
     console.print(
         f"[green]Extracted {row_count} {row_word}(s) to {escape(str(out_path))}[/green]",
+        soft_wrap=True)
+    console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
+                  "to map columns and classify.", soft_wrap=True)
+
+
+@excel_app.command("extract")
+def excel_extract_cmd(
+    file: Path = typer.Argument(..., exists=True,
+                                 help="Bank statement Excel export (.xls/.xlsx)"),
+    out: Path = typer.Option(None, help="Output CSV path (default: <file>.csv next to the source)"),
+    bank: str = typer.Option(
+        ..., "--bank",
+        help=f"Which bank's Excel export layout to parse. Available: "
+             f"{', '.join(EXCEL_PARSERS)}."),
+):
+    """Parse a bank statement Excel export — downloaded directly from the
+    bank's own website, not emailed — into a CSV for `munim import`.
+    Unlike `pdf extract`, no password is ever requested: these exports
+    aren't encrypted the way emailed statement PDFs are.
+    """
+    if bank not in EXCEL_PARSERS:
+        console.print(
+            f"[red]Unknown --bank '{escape(bank)}'. Available: "
+            f"{', '.join(EXCEL_PARSERS)}.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        rows = EXCEL_PARSERS[bank](file)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
+
+    if not rows:
+        console.print(
+            "[yellow]No transaction rows found in this file — the parser "
+            "may not fit this export's layout.[/yellow]")
+        raise typer.Exit(1)
+
+    header_row = (hdfc_bank_account_excel.HEADER_ROW if bank == "hdfc-bank"
+                  else [f"Column {i + 1}" for i in range(len(rows[0]))])
+    final_rows = [header_row, *rows]
+
+    out_path = out or file.with_suffix(".csv")
+    if out_path.exists():
+        console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
+    write_csv(final_rows, out_path)
+    console.print(
+        f"[green]Extracted {len(rows)} transaction row(s) to {escape(str(out_path))}[/green]",
         soft_wrap=True)
     console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
                   "to map columns and classify.", soft_wrap=True)

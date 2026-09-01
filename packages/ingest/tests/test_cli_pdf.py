@@ -430,6 +430,33 @@ def test_pdf_extract_bank_hdfc_bank_explodes_mega_rows(tmp_path):
     assert lines[2].startswith("02/07/2026,") and lines[2].endswith(",500.00")
 
 
+def test_pdf_extract_bank_hdfc_bank_warns_about_unparseable_pages(tmp_path):
+    """A version of hdfc_bank_account's parser once dropped a whole page
+    silently on any narration-alignment failure, with no way for the
+    user to notice — 47 real transactions across 9 months were lost this
+    way (including one large FD redemption) before it was caught. The
+    CLI must warn loudly whenever this happens, not just report the
+    (now-smaller) transaction count."""
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+    out_path = tmp_path / "out.csv"
+    raw_rows = [[
+        "01/07/2026\n02/07/2026",  # 2 dates
+        "Only one narration Value Dt 01/07/2026 Ref 1",  # 1 narration segment
+        "10.00\n20.00", "0.00\n0.00", "90.00\n70.00",
+    ]]
+
+    with patch("munim_ingest.cli.getpass.getpass", return_value="pw"), \
+         patch("munim_ingest.cli.open_pdf", return_value=_fake_pdf()), \
+         patch("munim_ingest.cli.extract_rows", return_value=raw_rows):
+        result = runner.invoke(
+            app, ["pdf", "extract", str(pdf_path), "--out", str(out_path),
+                  "--bank", "hdfc-bank"])
+
+    assert "1 page(s) could not be parsed" in result.output
+    assert "parser fix, not a retry" in result.output.lower()
+
+
 def test_pdf_extract_unknown_bank_exits_cleanly(tmp_path):
     pdf_path = tmp_path / "statement.pdf"
     pdf_path.write_bytes(b"%PDF-fake")
