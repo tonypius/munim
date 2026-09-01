@@ -250,10 +250,27 @@ class Handler(BaseHTTPRequestHandler):
         dictionary = MemoryMatcher(
             user_rules={}, region=self.store.get_config("region", "in")
         ).dictionary
+        # A pattern that never equals any real transaction's complete
+        # merchant_norm/payee_handle can only ever have matched (or will
+        # match) via substring/fuzzy containment, never a literal
+        # equality lookup — a genuinely checkable "this rule is broad"
+        # signal, not a length guess. Two rules can look identical in
+        # this table (a full narration-derived string vs. a hand-typed
+        # keyword like "CREDCLUB" meant to catch every payment-processor
+        # variant of one recurring fee) while behaving very differently.
+        exact_strings = {
+            t.merchant_norm or t.payee_handle
+            for t in self.store.all_transactions()
+            if t.merchant_norm or t.payee_handle
+        }
         return {
-            "learned": [dict(r) for r in learned],
+            "learned": [
+                {**dict(r), "broad": r["pattern"] not in exact_strings}
+                for r in learned
+            ],
             "dictionary": sorted(
-                [{"pattern": p, "category": c} for p, c in dictionary.items()],
+                [{"pattern": p, "category": c, "broad": p not in exact_strings}
+                 for p, c in dictionary.items()],
                 key=lambda r: (r["category"], r["pattern"])),
         }
 

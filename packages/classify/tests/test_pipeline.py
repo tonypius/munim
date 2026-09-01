@@ -18,6 +18,68 @@ def test_upi_merchant_extraction():
     assert r.payee_handle == ""
 
 
+def test_upi_handle_trailing_disambiguator_suffix_is_stripped():
+    """Real finding: the same person's UPI handle can carry a trailing
+    "-N" when they link it through a second bank app — e.g.
+    "tessy.anthonyc@oksbi" vs "tessy.anthonyc-1@okicici" are the same
+    real person, but without stripping the suffix they normalize to two
+    different payee handles, so classifying one never helps the other
+    (a real cause of "rules feel too rigid" — a rule that never fires on
+    a plainly-recurring counterparty because of one disambiguator digit)."""
+    n = Normalizer(region="in")
+    plain = n.normalize("UPI-TESSY ANTHONY C-TESSY.ANTHONYC@OKSBI-SBIN0008614-300984376011-TESSY")
+    suffixed = n.normalize("UPI-TESSY ANTHONY C-TESSY.ANTHONYC-1@OKICICI-SBIN0008614-319342257966-CHECKING")
+    assert plain.merchant == suffixed.merchant
+
+
+def test_upi_extraction_survives_stray_space_after_at_sign():
+    """Real finding, and the single biggest cause of unresolved
+    transactions found in one real account (283 of 1000, 28%): the
+    hdfc_bank_account.py PDF narration reconstruction collapses embedded
+    newlines to a single space, and the PDF often wraps a line right at
+    the '@' boundary of a VPA — producing 'name@ domain' instead of
+    'name@domain'. The old UPI extract regex required '@' to be
+    IMMEDIATELY followed by the domain characters with zero tolerance
+    for whitespace, so a stray space made the regex fail to match at
+    all — the entire raw string (UPI- prefix, ref numbers and all) fell
+    through as the merchant candidate instead of the real name.
+    'tessy.anthonyc@ oksbi' and 'tessy.anthonyc@oksbi' must extract the
+    same merchant regardless of that stray space."""
+    n = Normalizer(region="in")
+    clean = n.normalize("UPI-MARUTHI KUMAR D N-6363738086@AXL-KARB0000212-107756254596-MILK")
+    spaced = n.normalize("UPI-MARUTHI KUMAR D N-6363738086@ axl-KARB0000212-569454154786-milk")
+    assert clean.merchant == spaced.merchant == "MARUTHI KUMAR D N"
+
+
+def test_value_dt_ref_suffix_stripped_from_system_narrations():
+    """Real finding: bank-generated system narrations (interest posting,
+    SMS alert fees) never pass through any of the UPI/NEFT/IMPS extract
+    rails — there's no '@domain' to capture up to — so a trailing
+    'Value Dt DD/MM/YYYY [Ref <ref>]' (present on almost every one) was
+    never stripped, fragmenting one real recurring narration type into
+    many distinct merchant strings (one per date it happened to post
+    on) — 'CREDIT INTEREST CAPITALISED' every month, unrelated to any
+    specific date, should normalize identically regardless of which
+    month's instance it is."""
+    n = Normalizer(region="in")
+    bare = n.normalize("CREDIT INTEREST CAPITALISED")
+    dated = n.normalize("Credit Interest Capitalised Value Dt 31/12/2023")
+    reffed = n.normalize(
+        "JulSep25 InstaAlertChg 6 SMS 031025-MIR2633595356023 "
+        "Value Dt 02/12/2025 Ref MIR2633595356023")
+    assert bare.merchant == dated.merchant
+    assert "VALUE" not in reffed.merchant and "REF" not in reffed.merchant.split()
+
+
+def test_upi_handle_disambiguator_suffix_does_not_eat_real_trailing_digits():
+    """Defensive: only a short (1-2 digit) trailing '-N' is a plausible
+    disambiguator suffix — don't strip longer numeric segments that could
+    be a real, meaningful part of a merchant/account identifier."""
+    n = Normalizer(region="in")
+    r = n.normalize("UPI-SOME MERCHANT-merchant-12345@okaxis-513324498812")
+    assert "12345" in r.merchant
+
+
 def test_fuzzy_survives_spacing_damage():
     m = MemoryMatcher(user_rules={}, region="in")
     hit = m.match("SWIG GY INSTAMART")
@@ -523,6 +585,54 @@ def test_web_bulk_confirm_rejects_empty_ids_list(tmp_path):
         assert False, "expected HTTPError for an empty ids list"
     except urllib.error.HTTPError as e:
         assert e.code == 400
+    srv.shutdown()
+
+
+def test_web_rules_flags_patterns_with_no_exact_transaction_match_as_broad(tmp_path):
+    """The Rules page had no way to tell a deliberately-short generic
+    keyword (e.g. "CREDCLUB", taught so it substring-matches every
+    payment-processor variant of a recurring fee) apart from a full,
+    effectively-exact merchant string — both rendered identically. A
+    pattern that never equals any real transaction's complete
+    merchant_norm/payee_handle can only ever have matched (or will
+    match) via substring/fuzzy containment, never a literal lookup —
+    that's checkable and is exactly the "broad" signal to surface."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Subscriptions", "Dining"])
+    txns = [
+        Transaction(date="2026-07-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-CREDCLUB1 CRED CLUB@okaxis-999912345001",
+                    merchant_norm="CREDCLUB1 CRED CLUB", category="Subscriptions",
+                    status=Status.CONFIRMED, stage=Stage.USER),
+        Transaction(date="2026-07-02", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY8102@okaxis-999912345002",
+                    merchant_norm="SWIGGY8102", category="Dining",
+                    status=Status.CONFIRMED, stage=Stage.USER),
+    ]
+    store.upsert_transactions(txns)
+    # "CREDCLUB" is a hand-typed generic keyword — it never equals either
+    # transaction's full merchant_norm, only appears as a substring of one.
+    store.remember("CREDCLUB", "Subscriptions", kind="merchant")
+    # "SWIGGY8102" is the real, complete merchant_norm of an actual
+    # transaction — an exact rule, not a generalized keyword.
+    store.remember("SWIGGY8102", "Dining", kind="merchant")
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    learned = json.loads(urllib.request.urlopen(base + "/api/rules", timeout=3).read())["learned"]
+
+    by_pattern = {r["pattern"]: r for r in learned}
+    assert by_pattern["CREDCLUB"]["broad"] is True
+    assert by_pattern["SWIGGY8102"]["broad"] is False
     srv.shutdown()
 
 

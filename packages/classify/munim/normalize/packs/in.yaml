@@ -12,9 +12,15 @@ payee:
   - pattern: 'UPI[-/]P2[PM][-/]([A-Z][A-Z ]{2,40})'
 
 extract:
-  - pattern: 'UPI[-/]([A-Z0-9 .&*_-]+?)(?:@[\w.-]+)'
+  - pattern: 'UPI[-/]([A-Z0-9 .&*_-]+?)(?:@\s*[\w.-]+)'
     rail: upi
-    note: "UPI VPA: UPI-SWIGGY8102@okaxis -> SWIGGY8102"
+    note: "UPI VPA: UPI-SWIGGY8102@okaxis -> SWIGGY8102. @\\s* (not bare @):
+      PDF narration reconstruction can leave a stray space right after '@'
+      (a line-wrap artifact) — a version requiring '@' immediately followed
+      by the domain failed to match AT ALL on those rows, so the entire
+      raw string (including the UPI- prefix) fell through as the merchant
+      candidate instead of the real name. Real impact: 283 of 1000
+      unresolved transactions in one account (28%) had this exact failure."
   - pattern: '^(?:POS|PCD|ECOM)[\s*/-]+(?:\d+[\s*/-]+)?(.+?)(?:\s+(?:IN|IND)\b.*)?$'
     rail: card
     note: "Card POS: POS 512967 SWIGGY BANGALORE IN"
@@ -24,9 +30,27 @@ extract:
     rail: bank_transfer
 
 strip:
+  - pattern: 'Value\s+Dt\s+\d{2}/\d{2}/\d{4}(?:\s+Ref\s+\S+)?\s*$'
+    # Trailing "Value Dt DD/MM/YYYY [Ref <ref>]" on bank-generated system
+    # narrations (interest posting, SMS alert fees) that never pass
+    # through a UPI/NEFT/IMPS extract rail — there's no "@domain" to
+    # capture up to, so this survived untouched, fragmenting one
+    # recurring narration type into a separate merchant string per date
+    # it happened to post on ("CREDIT INTEREST CAPITALISED" every month
+    # is the same thing, not tied to which date it landed on).
+  - pattern: '-\d{1,2}$'             # UPI VPA disambiguator: tessy.anthonyc-1@bank
+                                      # is the same person as tessy.anthonyc@bank,
+                                      # linked through a second bank app — without
+                                      # this, a rule taught on one variant never
+                                      # fires on the other. 1-2 digits only: a
+                                      # longer numeric tail could be a real,
+                                      # meaningful identifier, not a disambiguator.
   - pattern: '\b\d{6,}\b'            # long numeric reference numbers
   - pattern: '\b[A-Z]\d{8,}\b'       # alphanumeric refs: N156261234567890
-  - pattern: '@[\w.-]+'              # residual VPA domains
+  - pattern: '@\s*[\w.-]+'           # residual VPA domains (same @\s* fix as
+                                      # the UPI extract rule above, for a
+                                      # domain fragment left over from a
+                                      # different rail, e.g. NEFT/IMPS)
   - pattern: '\b(?:PVT|LTD|LIMITED|PRIVATE|INDIA|PAYMENTS?|TECHNOLOGIES|MARKETPLACE|COLLECTION)\b'
   - pattern: '\b(?:BLR|BANGALORE|BENGALURU|MUM|MUMBAI|DEL|DELHI|HYD|CHN|PUN|KOL|IN|IND)\s*$'
   - pattern: '\b(?:ST|STORE|TERMINAL|TXN|REF|NO)\s*\d*\b'

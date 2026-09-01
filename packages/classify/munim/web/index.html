@@ -56,6 +56,7 @@ tr:hover td{background:var(--paper-deep)}
   border-radius:3px;padding:1px 6px;color:var(--ink-soft);white-space:nowrap}
 .tag.confirmed{color:var(--ink-green);border-color:var(--ink-green)}
 .tag.person{color:var(--pen-blue);border-color:var(--pen-blue)}
+.tag.broad{color:var(--ledger-red);border-color:var(--ledger-red);cursor:help}
 .raw{color:var(--ink-soft);font:12px var(--mono);word-break:break-all}
 .controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 input,select{font:14px var(--mono);background:#fff;color:var(--ink);
@@ -357,12 +358,21 @@ async function categories(){
 }
 
 /* rules */
+const BROAD_TITLE="This pattern never equals the complete merchant text of any "
+  +"transaction you've seen — it can only ever match by appearing INSIDE a "
+  +"longer one (substring/fuzzy), so it may also catch merchants you didn't "
+  +"expect.";
+function patternCell(r){
+  return `<td class="merchant">${esc(r.pattern)}`
+    +(r.broad?` <span class="tag broad" title="${esc(BROAD_TITLE)}">broad match</span>`:"")
+    +`</td>`;
+}
 async function rules(){
   const d=await api("/api/rules");
   const learned=d.learned.length?`<table><thead><tr>
     <th>Pattern</th><th>Kind</th><th>Head</th><th>Learned</th>
   </tr></thead><tbody>`+d.learned.map(r=>`<tr>
-    <td class="merchant">${esc(r.pattern)}</td>
+    ${patternCell(r)}
     <td>${r.kind==="payee"?'<span class="tag person">person</span>':'<span class="tag">merchant</span>'}</td>
     <td>${esc(r.category)}</td><td class="num">${esc(r.created_at).slice(0,10)}</td>
   </tr>`).join("")+`</tbody></table>`
@@ -370,7 +380,7 @@ async function rules(){
   $("#rulesBody").innerHTML=`<h2 style="font-size:16px">Learned (${d.learned.length})</h2>${learned}
   <h2 style="font-size:16px;margin-top:26px">Community dictionary (${d.dictionary.length})</h2>
   <table><thead><tr><th>Pattern</th><th>Head</th></tr></thead><tbody>`+
-  d.dictionary.map(r=>`<tr><td class="merchant">${esc(r.pattern)}</td><td>${esc(r.category)}</td></tr>`).join("")+
+  d.dictionary.map(r=>`<tr>${patternCell(r)}<td>${esc(r.category)}</td></tr>`).join("")+
   `</tbody></table>`;
 }
 
