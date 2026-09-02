@@ -370,11 +370,12 @@ def _print_stage_table(by_stage: dict, total: int | None = None) -> None:
     table.add_column("Count", justify="right")
     table.add_column("Share", justify="right")
     order = ["structural", "memory_exact", "memory_fuzzy", "dictionary",
-             "fallback", "none"]
+             "purpose", "fallback", "none"]
     labels = {"structural": "Structural (transfers etc.)",
               "memory_exact": "Memory — exact",
               "memory_fuzzy": "Memory — fuzzy",
               "dictionary": "Community dictionary",
+              "purpose": "Purpose keyword (narration text)",
               "fallback": "Fallback classifier",
               "none": "Unresolved (review queue)"}
     for key in order:

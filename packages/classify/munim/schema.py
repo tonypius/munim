@@ -26,6 +26,7 @@ class Stage(str, Enum):
     MEMORY_EXACT = "memory_exact"
     MEMORY_FUZZY = "memory_fuzzy"
     DICTIONARY = "dictionary"      # community merchant dictionary
+    PURPOSE = "purpose"            # keyword in the raw narration's purpose tail
     FALLBACK = "fallback"          # trained classifier
     USER = "user"                  # manually set in review
     NONE = "none"

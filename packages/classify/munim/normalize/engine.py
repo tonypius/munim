@@ -15,12 +15,33 @@ import yaml
 
 PACKS_DIR = Path(__file__).parent / "packs"
 
+# The trailing purpose word on a UPI narration (e.g.
+# '...-336468937787-fo od Value Dt 30/12/2023 Ref 336468937787' means
+# "food") sits after the last long reference number, before Value Dt/Ref.
+# It's real signal for otherwise-unidentifiable P2P payments, but it lives
+# outside the merchant/payee capture group entirely — extracted here,
+# independently, so it survives regardless of which extract rail fires
+# (or none at all).
+_PURPOSE_TAIL_RE = re.compile(r"-\d{6,}-(.*)$")
+_VALUE_DT_RE = re.compile(r"\s*Value\s+Dt\s+\d{2}/\d{2}/\d{4}.*$", re.IGNORECASE)
+_TRAILING_REF_RE = re.compile(r"\s*Ref\s+\d+$", re.IGNORECASE)
+
+
+def _extract_purpose(description: str) -> str:
+    m = _PURPOSE_TAIL_RE.search(description)
+    if not m:
+        return ""
+    tail = _VALUE_DT_RE.sub("", m.group(1))
+    tail = _TRAILING_REF_RE.sub("", tail)
+    return tail.strip()
+
 
 @dataclass
 class NormResult:
     merchant: str = ""
     payee_handle: str = ""
     rail: str = ""
+    purpose: str = ""
 
 
 @dataclass
@@ -43,12 +64,14 @@ class Normalizer:
 
     def normalize(self, description: str) -> NormResult:
         text = description.strip()
+        purpose = _extract_purpose(text)
 
         # 1. P2P payee detection first — a person is not a merchant
         for rx in self._payee:
             m = rx.search(text)
             if m:
-                return NormResult(payee_handle=m.group(1).upper().strip(), rail="p2p")
+                return NormResult(payee_handle=m.group(1).upper().strip(),
+                                   rail="p2p", purpose=purpose)
 
         # 2. Rail-specific extraction (first capture group = merchant candidate)
         rail = ""
@@ -65,4 +88,4 @@ class Normalizer:
 
         merchant = re.sub(r"[^A-Za-z0-9&' ]+", " ", text)
         merchant = re.sub(r"\s{2,}", " ", merchant).upper().strip()
-        return NormResult(merchant=merchant, rail=rail)
+        return NormResult(merchant=merchant, rail=rail, purpose=purpose)

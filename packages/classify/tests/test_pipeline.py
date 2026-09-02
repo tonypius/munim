@@ -684,4 +684,112 @@ def test_dashboard_filters_and_roots(tmp_path):
     assert d["net"] == 4900
     d_june = get("/api/dashboard?month=2026-06")
     assert d_june["roots"]["Income"] == 0 and d_june["total"] == 100
-    srv.shutdown()
+
+
+# ------------------------------------------------------- purpose-tail sweep
+def test_normalizer_extracts_purpose_tail_from_upi_narration():
+    """Real finding: 400+ otherwise-unclassifiable individual UPI payments
+    in one real account carried a purpose word in the raw narration
+    ('...-336468937787-fo od Value Dt 30/12/2023 Ref 336468937787' means
+    "food") that the pipeline silently discarded — the UPI extract step
+    replaces the whole string with just the captured VPA username, so
+    this text never reached merchant_norm or payee_handle. Must survive
+    the same stray-space-mid-word artifact as other narrations in this
+    pack ("fo od", not "food")."""
+    n = Normalizer(region="in")
+    r = n.normalize(
+        "UPI-BALMIKI KUMAR SWEET-gpay-11240952815@ okbizaxis-UTIB0000000-"
+        "336468937787-fo od Value Dt 30/12/2023 Ref 336468937787")
+    assert r.purpose.replace(" ", "").upper() == "FOOD"
+
+
+def test_normalizer_extracts_purpose_even_when_payee_detected():
+    """Payee detection returns early, before the merchant extract/strip
+    logic runs — purpose extraction must not be skipped just because the
+    counterparty turned out to be a person. P2P payments to unknown
+    individuals are exactly where this signal matters most."""
+    n = Normalizer(region="in")
+    r = n.normalize(
+        "UPI-P2P-NOUFIR N-9074321759@okbizaxis-UTIB0000000-413471084825-"
+        "ta xi Value Dt 13/05/2024 Ref 413471084825")
+    assert r.payee_handle == "NOUFIR N"
+    assert r.purpose.replace(" ", "").upper() == "TAXI"
+
+
+def test_purpose_matcher_exact_and_stray_space():
+    from munim.memory import PurposeMatcher
+    m = PurposeMatcher()
+    assert m.match("fo od").category == "Dining"
+    assert m.match("ta xi").category == "Transport"
+
+
+def test_purpose_matcher_overcaptured_tail_resolves_via_suffix():
+    """Some raw narrations over-capture (an earlier short digit run in
+    the string matches first), leaving VPA/IFSC noise glued to the front
+    of the real purpose word — must still resolve via the trailing word,
+    not fail outright."""
+    from munim.memory import PurposeMatcher
+    m = PurposeMatcher()
+    hit = m.match("2@YBL-KARB0000309-104666732612-TAXI")
+    assert hit and hit.category == "Transport"
+
+
+def test_purpose_matcher_generic_labels_stay_unmatched():
+    from munim.memory import PurposeMatcher
+    m = PurposeMatcher()
+    assert m.match("UPI") is None
+    assert m.match("misc") is None
+
+
+def test_pipeline_resolves_unknown_payee_via_purpose_keyword(tmp_path):
+    """The concrete gap this closes: a merchant-string counterparty with
+    no matching memory/dictionary entry (real example: 'Noufir N', a
+    one-off UPI recipient) used to dead-end at Stage.NONE/Status.UNRESOLVED
+    even when the raw narration plainly said what it was for. This
+    narration's merchant text doesn't parse as 'name-like' by the
+    existing heuristic (a single-letter middle initial breaks it), so it
+    exercises the general merchant-miss path, not the payee-routing one."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    t = Transaction(date="2026-06-04", amount=120, direction=Direction.DEBIT,
+                    description_raw="UPI-Noufir N-9074321759@okbizaxis-"
+                                    "UTIB0000000-413471084825-taxi Value Dt "
+                                    "13/05/2024 Ref 413471084825")
+    Pipeline(store).run([t])
+    assert t.category == "Transport"
+    assert t.stage == Stage.PURPOSE
+    assert t.status == Status.PROVISIONAL  # still needs a human to confirm
+
+
+def test_pipeline_resolves_person_like_merchant_via_purpose_keyword(tmp_path):
+    """Same gap, the dedicated dead end: a merchant string that the
+    'looks like a person' heuristic recognizes (two clean alpha words, no
+    business vocabulary) and routes to payee memory — which, with no rule
+    taught yet, used to fall straight to Stage.NONE without ever trying
+    the purpose tail."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    t = Transaction(date="2026-06-04", amount=85, direction=Direction.DEBIT,
+                    description_raw="UPI-RAMESH KUMAR@okhdfcbank-"
+                                    "UTIB0000000-421024554019-food Value Dt "
+                                    "28/07/2024 Ref 421024554019")
+    Pipeline(store).run([t])
+    assert t.category == "Dining"
+    assert t.stage == Stage.PURPOSE
+    assert t.payee_handle == "RAMESH KUMAR"  # still routed to payee, just resolved
+
+
+def test_pipeline_memory_still_outranks_purpose_keyword(tmp_path):
+    """A specific taught rule for this exact person must win even when
+    the raw narration also happens to carry a purpose word — purpose is
+    a last resort, never a priority override."""
+    store = Store(home=tmp_path)
+    store.remember("RAMESH KUMAR", "Family & Friends", kind="payee")
+    store.set_config("region", "in")
+    t = Transaction(date="2026-06-04", amount=120, direction=Direction.DEBIT,
+                    description_raw="UPI-RAMESH KUMAR@okhdfcbank-"
+                                    "UTIB0000000-413471084825-taxi Value Dt "
+                                    "13/05/2024 Ref 413471084825")
+    Pipeline(store).run([t])
+    assert t.category == "Family & Friends"
+    assert t.stage == Stage.MEMORY_EXACT

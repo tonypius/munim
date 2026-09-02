@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from .schema import Transaction, Direction, Stage, Status
 from .store import Store
 from .normalize import Normalizer
-from .memory import MemoryMatcher
+from .memory import MemoryMatcher, PurposeMatcher
 from .structural import detect_transfers, detect_recurrence
 from .fallback import TfidfClassifier, SKLEARN_AVAILABLE
 
@@ -57,6 +57,8 @@ class Pipeline:
             threshold=store.get_config("fuzzy_threshold", 90),
         )
         self.payee_rules = store.memory_rules("payee")
+        self.purpose_matcher = PurposeMatcher(
+            threshold=store.get_config("fuzzy_threshold", 90))
         # User category renames: dictionary emits standard taxonomy names;
         # aliases remap them to the user's chosen names (e.g. Dining -> Food).
         self.aliases: dict = store.get_config("category_aliases", {})
@@ -93,7 +95,7 @@ class Pipeline:
                     self._assign(t, self.payee_rules[t.payee_handle],
                                  Stage.MEMORY_EXACT, 1.0)
                     stats.bump(Stage.MEMORY_EXACT)
-                else:
+                elif not self._try_purpose(t, stats):
                     stats.bump(Stage.NONE)
                 continue
 
@@ -117,7 +119,14 @@ class Pipeline:
                     stats.bump(Stage.MEMORY_EXACT)
                 else:
                     t.payee_handle, t.merchant_norm = t.merchant_norm, ""
-                    stats.bump(Stage.NONE)
+                    if not self._try_purpose(t, stats):
+                        stats.bump(Stage.NONE)
+                continue
+
+            # Last-resort keyword signal, tried before the probabilistic
+            # fallback since a literal purpose word is more explainable
+            # (and usually more reliable) than an ML guess.
+            if self._try_purpose(t, stats):
                 continue
 
             # Stage 5: fallback classifier (provisional, optional)
@@ -129,6 +138,19 @@ class Pipeline:
                 stats.bump(Stage.NONE)
 
         return stats
+
+    def _try_purpose(self, t: Transaction, stats: PipelineStats) -> bool:
+        """Last resort: the raw narration's purpose tail (e.g. '...-food
+        Value Dt...') against the purpose keyword dictionary. Only ever
+        reached after merchant/payee memory and the community dictionary
+        have already missed."""
+        purpose = self.normalizer.normalize(t.description_raw).purpose
+        match = self.purpose_matcher.match(purpose)
+        if not match:
+            return False
+        self._assign(t, match.category, Stage.PURPOSE, match.score / 100)
+        stats.bump(Stage.PURPOSE)
+        return True
 
     @staticmethod
     def _looks_like_person(merchant: str) -> bool:

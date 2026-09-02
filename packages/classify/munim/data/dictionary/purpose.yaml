@@ -1,0 +1,143 @@
+# Purpose-tail dictionary — last-resort signal for UPI payments to
+# individuals with no merchant/payee identity of their own (street
+# vendors, drivers, etc.). Matched against the trailing purpose word in
+# the raw narration (see Normalizer's `purpose` field), NOT the merchant
+# name — patterns here are whitespace-free (spaces are stripped from both
+# the input and these keys before comparing, since raw narrations often
+# have a stray space inserted mid-word from PDF/line-wrap reconstruction:
+# "fo od", "ta xi").
+# Format: Category -> list of purpose keywords (uppercase, no spaces).
+
+Dining:
+  - FOOD
+  - TEA
+  - JUICE
+  - ICECREAM
+  - CAKE
+  - DESSERT
+  - DINNER
+  - BISCUIT
+  - COFFEE
+  - TEASNACKS
+  - BAKERY
+
+Groceries:
+  - GROCERY
+  - FRUITS
+  - FRUIT
+  - VEGETABLES
+  - VEGETABLE
+  - MILK
+  - MILKDIARY
+  - COCONUT
+  - BEEF
+  - CHICKEN
+  - WATER
+  - WATERBOTTLE
+  - BREAD
+  - BEER
+  - WINE
+  - ALCOHOLWINE
+  - BEV
+
+Transport:
+  - TAXI
+  - TAXIAUTO
+  - AUTOTAXI
+  - AUTOTRAVEL
+  - AUTORIDE
+  - AUTO
+  - CABRIDE
+  - CAB
+  - CABAUTO
+  - UBERTAXI
+  - UBER
+  - CARPARKING
+  - PARKING
+  - PARKINGFEE
+  - CARPARK
+  - CARWASH
+  - TYREPUNCHER
+  - CARPOLLUTIONTEST
+  - CARPOLLUTION
+  - VEHICLEPOLLUTION
+  - CARAIR
+  - CARMECHANIC
+  - BIKE
+
+Health:
+  - MEDICINE
+  - MEDICINES
+  - MEDICAL
+  - HAIRCUT
+  - BABYHAIRCUT
+  - BEARD
+  - DOCTORCONSULT
+
+Household Help:
+  - IRONING
+  - DRESSIRONING
+  - CLOTHESIRONSUITS
+  - HOUSEWORK
+
+Shopping:
+  - TOYS
+  - JWELLERY
+  - DRESS
+  - SHOES
+  - SHOE
+  - FOOTWEAR
+  - FLOWERS
+  - STATIONARY
+  - PLANTS
+  - XMASCURIO
+  - XMASMARKET
+  - XMAS
+  - CLOTHES
+  - CURTAINSTRANSPORT
+  - CARPENTER
+  - BADMINTONSHOES
+  - PHOTOFRAME
+  - SHOPPING
+  - BULBS
+  - USBCABLE
+
+Travel:
+  - TRAVEL
+
+Entertainment:
+  - BOWLING
+  - GAMES
+  - BIRTHDAYCELEBRATI
+  - MOVIETICKET
+  - MOVIE
+  - POKER
+
+Utilities:
+  - WATERFILTERCHARG
+  - GAILGAS
+  - VISIM
+  - JIO
+
+Fuel:
+  - PETROL
+  - DIESEL
+
+Other:
+  - XEROX
+  - PAPERPRINTING
+  - PRINT
+  - AADHARUPDATE
+  - ADVANCEPHOTOGRAPH
+  - PHOTO
+  - COURIERFORWORK
+  - DODODHLCOURIER
+  - POSTCHARGES
+  - CHURCHITEMS
+  - LOCKSMITHSGS
+  - REPAIRAPPLICANCE
+  - LOCKPICK
+
+Family & Friends:
+  - SPLITWISEBALANCE
+  - FRIENDS
