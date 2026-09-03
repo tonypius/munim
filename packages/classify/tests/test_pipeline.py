@@ -21,14 +21,14 @@ def test_upi_merchant_extraction():
 def test_upi_handle_trailing_disambiguator_suffix_is_stripped():
     """Real finding: the same person's UPI handle can carry a trailing
     "-N" when they link it through a second bank app — e.g.
-    "tessy.anthonyc@oksbi" vs "tessy.anthonyc-1@okicici" are the same
+    "priya.sureshk@oksbi" vs "priya.sureshk-1@okicici" are the same
     real person, but without stripping the suffix they normalize to two
     different payee handles, so classifying one never helps the other
     (a real cause of "rules feel too rigid" — a rule that never fires on
     a plainly-recurring counterparty because of one disambiguator digit)."""
     n = Normalizer(region="in")
-    plain = n.normalize("UPI-TESSY ANTHONY C-TESSY.ANTHONYC@OKSBI-SBIN0008614-300984376011-TESSY")
-    suffixed = n.normalize("UPI-TESSY ANTHONY C-TESSY.ANTHONYC-1@OKICICI-SBIN0008614-319342257966-CHECKING")
+    plain = n.normalize("UPI-PRIYA SURESH K-PRIYA.SURESHK@OKSBI-SBIN0008614-300984376011-PRIYA")
+    suffixed = n.normalize("UPI-PRIYA SURESH K-PRIYA.SURESHK-1@OKICICI-SBIN0008614-319342257966-CHECKING")
     assert plain.merchant == suffixed.merchant
 
 
@@ -43,12 +43,12 @@ def test_upi_extraction_survives_stray_space_after_at_sign():
     for whitespace, so a stray space made the regex fail to match at
     all — the entire raw string (UPI- prefix, ref numbers and all) fell
     through as the merchant candidate instead of the real name.
-    'tessy.anthonyc@ oksbi' and 'tessy.anthonyc@oksbi' must extract the
+    'ganesh.raobs@ oksbi' and 'ganesh.raobs@oksbi' must extract the
     same merchant regardless of that stray space."""
     n = Normalizer(region="in")
-    clean = n.normalize("UPI-MARUTHI KUMAR D N-6363738086@AXL-KARB0000212-107756254596-MILK")
-    spaced = n.normalize("UPI-MARUTHI KUMAR D N-6363738086@ axl-KARB0000212-569454154786-milk")
-    assert clean.merchant == spaced.merchant == "MARUTHI KUMAR D N"
+    clean = n.normalize("UPI-GANESH RAO B S-9123456780@AXL-KARB0000212-107756254596-MILK")
+    spaced = n.normalize("UPI-GANESH RAO B S-9123456780@ axl-KARB0000212-569454154786-milk")
+    assert clean.merchant == spaced.merchant == "GANESH RAO B S"
 
 
 def test_value_dt_ref_suffix_stripped_from_system_narrations():
@@ -698,7 +698,7 @@ def test_normalizer_extracts_purpose_tail_from_upi_narration():
     pack ("fo od", not "food")."""
     n = Normalizer(region="in")
     r = n.normalize(
-        "UPI-BALMIKI KUMAR SWEET-gpay-11240952815@ okbizaxis-UTIB0000000-"
+        "UPI-MOUNTAIN VIEW SWEETS-gpay-11240952815@ okbizaxis-UTIB0000000-"
         "336468937787-fo od Value Dt 30/12/2023 Ref 336468937787")
     assert r.purpose.replace(" ", "").upper() == "FOOD"
 
@@ -710,9 +710,9 @@ def test_normalizer_extracts_purpose_even_when_payee_detected():
     individuals are exactly where this signal matters most."""
     n = Normalizer(region="in")
     r = n.normalize(
-        "UPI-P2P-NOUFIR N-9074321759@okbizaxis-UTIB0000000-413471084825-"
+        "UPI-P2P-ARJUN T-9123456781@okbizaxis-UTIB0000000-413471084825-"
         "ta xi Value Dt 13/05/2024 Ref 413471084825")
-    assert r.payee_handle == "NOUFIR N"
+    assert r.payee_handle == "ARJUN T"
     assert r.purpose.replace(" ", "").upper() == "TAXI"
 
 
@@ -743,16 +743,17 @@ def test_purpose_matcher_generic_labels_stay_unmatched():
 
 def test_pipeline_resolves_unknown_payee_via_purpose_keyword(tmp_path):
     """The concrete gap this closes: a merchant-string counterparty with
-    no matching memory/dictionary entry (real example: 'Noufir N', a
-    one-off UPI recipient) used to dead-end at Stage.NONE/Status.UNRESOLVED
-    even when the raw narration plainly said what it was for. This
-    narration's merchant text doesn't parse as 'name-like' by the
-    existing heuristic (a single-letter middle initial breaks it), so it
-    exercises the general merchant-miss path, not the payee-routing one."""
+    no matching memory/dictionary entry (real example: a one-off UPI
+    recipient with a middle initial) used to dead-end at
+    Stage.NONE/Status.UNRESOLVED even when the raw narration plainly said
+    what it was for. This narration's merchant text doesn't parse as
+    'name-like' by the existing heuristic (a single-letter middle initial
+    breaks it), so it exercises the general merchant-miss path, not the
+    payee-routing one."""
     store = Store(home=tmp_path)
     store.set_config("region", "in")
     t = Transaction(date="2026-06-04", amount=120, direction=Direction.DEBIT,
-                    description_raw="UPI-Noufir N-9074321759@okbizaxis-"
+                    description_raw="UPI-Arjun T-9123456781@okbizaxis-"
                                     "UTIB0000000-413471084825-taxi Value Dt "
                                     "13/05/2024 Ref 413471084825")
     Pipeline(store).run([t])

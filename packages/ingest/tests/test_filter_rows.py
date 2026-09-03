@@ -20,7 +20,7 @@ def test_keeps_only_dominant_length_rows_starting_with_a_date():
         # date but wrong shape — not a transaction; the dominant length filter
         # must exclude this even though the date-prefix check alone would not)
         ["Date", "Transaction Description", "Feature Reward", "Amount (in Rs.)", None],
-        [None, "TONY PIUS ALAPATT", None, None, None],  # 5-col blank/name row
+        [None, "RAMESH KUMAR", None, None, None],  # 5-col blank/name row
         _transaction("21/01/2024", "GROFERS INDIA", None, "379.00"),
         _transaction("21/01/2024 12:55:34", "ZOMATO LTD", "4", "179.00"),
         _transaction("23/01/2024", "RAZ*IRCTC", "- 68", "2,600.00Cr"),
@@ -43,7 +43,7 @@ def test_recovers_a_date_not_at_the_very_start_of_the_cell():
     rows = [
         _transaction("garbage09/02/2024 14:54:14", "SLACK SUBSCRIPTION", "144", "5,438.01"),
         _transaction("21/01/2024", "GROFERS INDIA", None, "379.00"),
-        [None, "TONY PIUS ALAPATT", None, None, None],
+        [None, "RAMESH KUMAR", None, None, None],
     ]
 
     result = filter_transaction_rows(rows)

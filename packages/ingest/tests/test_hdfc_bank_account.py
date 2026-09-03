@@ -83,7 +83,7 @@ def test_ref_number_wrapped_onto_next_line_still_parses():
     mis-segments every narration after it."""
     row = _mega_row(
         ["03/07/2026"],
-        ["UPI-TONY PIUS ALAPATT-tony@oksbi-SIBL0001-655052472739-save "
+        ["UPI-RAMESH KUMAR-ramesh@oksbi-SIBL0001-655052472739-save "
          "Value Dt 03/07/2026 Ref\n655052472739"],
         ["300.00"], ["0.00"], ["9200.00"])
     result = normalize_hdfc_bank_account_rows([row])
@@ -130,9 +130,9 @@ def test_narration_with_no_ref_number_still_splits_correctly():
     row = _mega_row(
         ["03/08/2024", "03/08/2024", "04/08/2024"],
         [
-            "FD Redeem Interest -50300775239247/2 Value Dt 03/08/2024",
-            "FT -: FD A/C NO 50300775239247 Value Dt 03/08/2024",
-            "UPI-FAISAL MOHAMMED SHAL-faisal@okicici-ICIC0001-42172 "
+            "FD Redeem Interest -50300000000001/2 Value Dt 03/08/2024",
+            "FT -: FD A/C NO 50300000000001 Value Dt 03/08/2024",
+            "UPI-SURESH BABU B B-sureshbabu@okicici-ICIC0001-42172 "
             "Value Dt 04/08/2024 Ref 421729191704",
         ],
         ["0.00", "0.00", "0.00"],
@@ -142,7 +142,7 @@ def test_narration_with_no_ref_number_still_splits_correctly():
     assert len(result) == 3
     assert result[0][2] == "1270.00"
     assert result[1][2] == "600000.00"
-    assert result[1][1] == "FT -: FD A/C NO 50300775239247 Value Dt 03/08/2024"
+    assert result[1][1] == "FT -: FD A/C NO 50300000000001 Value Dt 03/08/2024"
     assert result[2][2] == "2500.00"
 
 
@@ -206,9 +206,9 @@ def test_find_statement_period_extracts_from_and_to_dates():
     transactions to go missing until caught by cross-checking a bank
     Excel export. Surfacing the declared period lets this be caught
     immediately instead."""
-    text = ("Tony Pius Alapatt\nAccount Number : 50100130659482\n"
+    text = ("Ramesh Kumar\nAccount Number : 50100000000002\n"
             "Statement From : 03/11/2025 To 30/11/2025 Karnataka\n"
-            "Currency : INR 560078")
+            "Currency : INR 560001")
     assert find_statement_period(text) == ("03/11/2025", "30/11/2025")
 
 

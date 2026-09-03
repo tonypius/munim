@@ -70,7 +70,7 @@ def test_leading_name_text_before_date_is_ignored():
     """A page-header name sometimes lands on the same extracted cell as
     the next transaction line, separated by an embedded newline."""
     result = parse_transaction_line(
-        "TONY PIUS ALAPATT\n21/08/2025| 09:28 NETFLIX DI SIMUMBAI C 649.00 l")
+        "RAMESH KUMAR\n21/08/2025| 09:28 NETFLIX DI SIMUMBAI C 649.00 l")
     assert result == ("21/08/2025", "NETFLIX DI SIMUMBAI", "-649.00")
 
 
