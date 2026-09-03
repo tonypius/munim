@@ -636,6 +636,65 @@ def categories_map(leaf: str, path: str):
                   "use this; classification stays flat)")
 
 
+subcat_app = typer.Typer(help="Manage subcategories under a category head.",
+                         no_args_is_help=True)
+cat_app.add_typer(subcat_app, name="subcategories")
+
+
+@subcat_app.command("add")
+def subcategories_add(parent: str, name: str,
+                      force: bool = typer.Option(False, "--force")):
+    """Add a subcategory under an existing category, e.g.:
+    munim categories subcategories add Groceries Alcohol"""
+    from .tree import MAX_SUBCATEGORIES_PER_PARENT
+    store = _store()
+    cats = store.get_config("categories", DEFAULT_CATEGORIES)
+    if parent not in cats:
+        console.print(f"[red]{parent} is not a category "
+                      f"(munim categories list).[/red]")
+        raise typer.Exit(1)
+    subcats = store.get_config("subcategories", {}) or {}
+    existing = subcats.get(parent, [])
+    if name in existing:
+        console.print(f"[yellow]{parent}:{name} already exists.[/yellow]")
+        raise typer.Exit(1)
+    if len(existing) >= MAX_SUBCATEGORIES_PER_PARENT and not force:
+        console.print(
+            f"[red]{parent} already has {len(existing)} subcategories — "
+            f"the limit is {MAX_SUBCATEGORIES_PER_PARENT} per head.[/red] "
+            "--force if you accept the tradeoff.")
+        raise typer.Exit(1)
+    subcats[parent] = existing + [name]
+    store.set_config("subcategories", subcats)
+    console.print(f"[green]Added {parent}:{name}.[/green] Teach it with: "
+                  f"munim learn <pattern> {parent} --subcategory {name}")
+
+
+@subcat_app.command("list")
+def subcategories_list(
+    parent: str = typer.Argument(None, help="Show one head's subcategories only"),
+):
+    """Show subcategories and how much each has been used."""
+    store = _store()
+    subcats = store.get_config("subcategories", {}) or {}
+    usage = {(r["category"], r["subcategory"]): r["n"] for r in store.db.execute(
+        "SELECT category, subcategory, COUNT(*) AS n FROM transactions "
+        "WHERE subcategory != '' GROUP BY category, subcategory")}
+    items = subcats.items() if not parent else [(parent, subcats.get(parent, []))]
+    if not any(names for _, names in items):
+        console.print("[dim]No subcategories yet — "
+                      "munim categories subcategories add <head> <name>[/dim]")
+        return
+    table = Table(title="Subcategories")
+    table.add_column("Head")
+    table.add_column("Subcategory")
+    table.add_column("Transactions", justify="right")
+    for head, names in items:
+        for name in names:
+            table.add_row(head, name, str(usage.get((head, name), 0)))
+    console.print(table)
+
+
 # ----------------------------------------------------------------- accounts
 acct_app = typer.Typer(help="Manage account types.", no_args_is_help=True)
 app.add_typer(acct_app, name="accounts")

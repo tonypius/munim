@@ -296,3 +296,60 @@ def test_reclassify_resets_subcategory_on_unconfirmed_rows(tmp_path, monkeypatch
     assert result.exit_code == 0, result.output
     reloaded = Store(home=tmp_path).get_transaction(t.id)
     assert reloaded.subcategory == ""
+
+
+def test_subcategories_add_creates_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    result = runner.invoke(app, ["categories", "subcategories", "add",
+                                 "Groceries", "Alcohol"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert fresh.get_config("subcategories", {}) == {"Groceries": ["Alcohol"]}
+
+
+def test_subcategories_add_rejects_unknown_parent(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    result = runner.invoke(app, ["categories", "subcategories", "add",
+                                 "NotACategory", "Alcohol"])
+    assert result.exit_code != 0
+
+
+def test_subcategories_add_rejects_duplicate(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    result = runner.invoke(app, ["categories", "subcategories", "add",
+                                 "Groceries", "Alcohol"])
+    assert result.exit_code != 0
+
+
+def test_subcategories_add_enforces_per_parent_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": [f"Sub{i}" for i in range(10)]})
+    result = runner.invoke(app, ["categories", "subcategories", "add",
+                                 "Groceries", "OneTooMany"])
+    assert result.exit_code != 0
+    result_forced = runner.invoke(app, ["categories", "subcategories", "add",
+                                        "Groceries", "OneTooMany", "--force"])
+    assert result_forced.exit_code == 0, result_forced.output
+
+
+def test_subcategories_list_shows_usage_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol")
+    store.upsert_transactions([t])
+    result = runner.invoke(app, ["categories", "subcategories", "list"])
+    assert result.exit_code == 0
+    assert "Alcohol" in result.output
