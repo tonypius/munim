@@ -191,6 +191,17 @@ class Store:
         )
         self.db.commit()
 
+    def existing_subcategory(self, pattern: str, kind: str, category: str) -> str:
+        """The subcategory already on file for this pattern, but only if
+        `category` matches what memory has — a category change invalidates
+        whatever subcategory was taught under the old one."""
+        row = self.db.execute(
+            "SELECT category, subcategory FROM memory WHERE pattern=? AND kind=?",
+            (pattern.upper().strip(), kind)).fetchone()
+        if row and row["category"] == category:
+            return row["subcategory"] or ""
+        return ""
+
     def propagate(self, pattern: str, category: str, kind: str = "merchant",
                   exclude_id: str = "", subcategory: str = "") -> int:
         """Apply a just-confirmed rule to every other unconfirmed transaction

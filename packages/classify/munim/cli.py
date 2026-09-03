@@ -177,18 +177,27 @@ def review(limit: int = typer.Option(50, help="Max items this session")):
 
         # Loop 3: log prediction vs outcome for threshold calibration
         store.log_correction(t, final)
-        # Loop 1: confirmed mapping enters memory forever
+        # Loop 1: confirmed mapping enters memory forever. A subcategory
+        # already on file for this pattern only survives if `final`
+        # matches the category it was taught under — otherwise it no
+        # longer applies and must be cleared.
         if t.payee_handle:
-            store.remember(t.payee_handle, final, kind="payee")
-            n_more = store.propagate(t.payee_handle, final, "payee", t.id)
+            sub = store.existing_subcategory(t.payee_handle, "payee", final)
+            store.remember(t.payee_handle, final, kind="payee", subcategory=sub)
+            n_more = store.propagate(t.payee_handle, final, "payee", t.id,
+                                     subcategory=sub)
         elif t.merchant_norm:
-            store.remember(t.merchant_norm, final, kind="merchant")
-            n_more = store.propagate(t.merchant_norm, final, "merchant", t.id)
+            sub = store.existing_subcategory(t.merchant_norm, "merchant", final)
+            store.remember(t.merchant_norm, final, kind="merchant", subcategory=sub)
+            n_more = store.propagate(t.merchant_norm, final, "merchant", t.id,
+                                     subcategory=sub)
         else:
+            sub = ""
             n_more = 0
         if key[1]:
             session_done.add(key)
         t.category = final
+        t.subcategory = sub
         # is_transfer must track the category, not just the structural
         # auto-detector: a transaction the auto-detector couldn't pair
         # (e.g. a credit-card bill payment where only the card's own
@@ -557,6 +566,15 @@ def categories_rename(old: str, new: str):
         "UPDATE corrections SET final_category=? WHERE final_category=?",
         (new, old))
     store.db.commit()
+    # Subcategories are keyed by category name — move the entry along with
+    # the rename (renaming, not merging, so existing subcategory VALUES on
+    # transactions/memory rows are still valid and untouched above).
+    subcats = store.get_config("subcategories", {}) or {}
+    if old in subcats:
+        old_list = subcats.pop(old)
+        existing = subcats.get(new, [])
+        subcats[new] = existing + [s for s in old_list if s not in existing]
+        store.set_config("subcategories", subcats)
     # Alias: future dictionary hits for the standard name emit your name.
     aliases = store.get_config("category_aliases", {})
     aliases[old] = new
@@ -586,14 +604,21 @@ def categories_remove(
     if reassign_to not in cats or reassign_to == name:
         console.print(f"[red]Invalid reassignment target: {reassign_to}[/red]")
         raise typer.Exit(1)
+    # The removed category's subcategory list was only ever valid under
+    # IT, not necessarily under reassign_to — clear subcategory on every
+    # row being moved, on both tables.
     n = store.db.execute(
-        "UPDATE transactions SET category=? WHERE category=?",
+        "UPDATE transactions SET category=?, subcategory='' WHERE category=?",
         (reassign_to, name)).rowcount
-    store.db.execute("UPDATE memory SET category=? WHERE category=?",
+    store.db.execute("UPDATE memory SET category=?, subcategory='' WHERE category=?",
                      (reassign_to, name))
     store.db.commit()
     cats.remove(name)
     store.set_config("categories", cats)
+    subcats = store.get_config("subcategories", {}) or {}
+    if name in subcats:
+        subcats.pop(name)
+        store.set_config("subcategories", subcats)
     aliases = store.get_config("category_aliases", {})
     aliases[name] = reassign_to
     store.set_config("category_aliases", aliases)
@@ -842,15 +867,18 @@ def relabel(pattern: str, category: str):
     kinds = store.db.execute(
         "SELECT kind FROM memory WHERE pattern=?", (pattern,)).fetchall()
     kind = kinds[0]["kind"] if kinds else "merchant"
-    store.remember(pattern, category, kind=kind)
+    # A subcategory already on file survives only if `category` matches
+    # what memory has for this pattern — otherwise it no longer applies.
+    sub = store.existing_subcategory(pattern, kind, category)
+    store.remember(pattern, category, kind=kind, subcategory=sub)
     col = "payee_handle" if kind == "payee" else "merchant_norm"
     # is_transfer must track the category, not just the structural
     # auto-detector — see the same note in store.propagate().
     is_transfer = 1 if category == "Transfers" else 0
     n = store.db.execute(
-        f"UPDATE transactions SET category=?, status='confirmed', "
+        f"UPDATE transactions SET category=?, subcategory=?, status='confirmed', "
         f"stage='user', confidence=1.0, is_transfer=? WHERE {col}=?",
-        (category, is_transfer, pattern)).rowcount
+        (category, sub, is_transfer, pattern)).rowcount
     store.db.commit()
     console.print(f"[green]{pattern} → {category}[/green]: {n} transactions "
                   f"updated, memory rule replaced.")

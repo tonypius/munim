@@ -5,6 +5,7 @@ import json
 import sqlite3
 import sys
 import threading
+import urllib.error
 import urllib.request
 from http.server import HTTPServer
 from pathlib import Path
@@ -455,3 +456,300 @@ def test_ledger_export_omits_colon_when_no_subcategory():
     out = to_ledger([t], tree=default_tree(["Dining"]))
     assert "Expenses:Dining" in out
     assert "Expenses:Dining:" not in out
+
+
+# ----------------------------------------------------------------------
+# Final-review fix round: remember()/propagate() silently erasing
+# existing subcategory data on re-confirm, categories rename/remove not
+# touching subcategory data, and the web rule-subcategory endpoint
+# skipping the taxonomy-membership check the CLI enforces.
+# ----------------------------------------------------------------------
+
+# ---- Finding 1a: Store.existing_subcategory() ------------------------
+
+def test_existing_subcategory_returns_value_when_category_matches(tmp_path):
+    store = Store(home=tmp_path)
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    assert store.existing_subcategory(
+        "SHETTY BEER SHOP", "merchant", "Groceries") == "Alcohol"
+
+
+def test_existing_subcategory_returns_empty_when_category_differs(tmp_path):
+    store = Store(home=tmp_path)
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    assert store.existing_subcategory(
+        "SHETTY BEER SHOP", "merchant", "Household") == ""
+
+
+def test_existing_subcategory_returns_empty_for_unknown_pattern(tmp_path):
+    store = Store(home=tmp_path)
+    assert store.existing_subcategory("NOPE", "merchant", "Groceries") == ""
+
+
+# ---- Finding 1b: relabel preserves/clears subcategory -----------------
+
+def test_relabel_preserves_subcategory_when_category_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Household"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+
+    result = runner.invoke(app, ["relabel", "SHETTY BEER SHOP", "Groceries"])
+    assert result.exit_code == 0, result.output
+
+    fresh = Store(home=tmp_path)
+    reloaded = fresh.get_transaction(t.id)
+    assert reloaded.subcategory == "Alcohol"
+    mem = fresh.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert mem["subcategory"] == "Alcohol"
+
+
+def test_relabel_clears_subcategory_when_category_changes(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Household"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+
+    result = runner.invoke(app, ["relabel", "SHETTY BEER SHOP", "Household"])
+    assert result.exit_code == 0, result.output
+
+    fresh = Store(home=tmp_path)
+    reloaded = fresh.get_transaction(t.id)
+    assert reloaded.category == "Household"
+    assert reloaded.subcategory == ""
+    mem = fresh.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert mem["subcategory"] == ""
+
+
+# ---- Finding 1c: `review` command's confirm path -----------------------
+
+def test_review_accept_preserves_subcategory_same_category(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Dining"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP",
+                    confidence=0.9, stage="memory_exact")
+    store.upsert_transactions([t])
+
+    # blank input = accept the suggested category
+    result = runner.invoke(app, ["review"], input="\n")
+    assert result.exit_code == 0, result.output
+
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Groceries"
+    assert reloaded.subcategory == "Alcohol"
+    mem = Store(home=tmp_path).db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert mem["subcategory"] == "Alcohol"
+
+
+def test_review_correction_clears_subcategory_different_category(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Dining"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP",
+                    confidence=0.9, stage="memory_exact")
+    store.upsert_transactions([t])
+
+    # "1" picks categories[1] == "Dining" instead of the suggested Groceries
+    result = runner.invoke(app, ["review"], input="1\n")
+    assert result.exit_code == 0, result.output
+
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Dining"
+    assert reloaded.subcategory == ""
+    mem = Store(home=tmp_path).db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert mem["subcategory"] == ""
+
+
+# ---- Finding 1d: web _confirm_one via /api/confirm ---------------------
+
+def test_confirm_one_preserves_subcategory_same_category(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Dining"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/confirm", method="POST",
+            data=json.dumps({"id": t.id, "category": "Groceries"}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True
+        reloaded = store.get_transaction(t.id)
+        assert reloaded.category == "Groceries"
+        assert reloaded.subcategory == "Alcohol"
+        mem = store.db.execute(
+            "SELECT subcategory FROM memory WHERE pattern=?",
+            ("SHETTY BEER SHOP",)).fetchone()
+        assert mem["subcategory"] == "Alcohol"
+    finally:
+        srv.shutdown()
+
+
+def test_confirm_one_clears_subcategory_different_category(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Dining"])
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/confirm", method="POST",
+            data=json.dumps({"id": t.id, "category": "Dining"}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True
+        reloaded = store.get_transaction(t.id)
+        assert reloaded.category == "Dining"
+        assert reloaded.subcategory == ""
+        mem = store.db.execute(
+            "SELECT subcategory FROM memory WHERE pattern=?",
+            ("SHETTY BEER SHOP",)).fetchone()
+        assert mem["subcategory"] == ""
+    finally:
+        srv.shutdown()
+
+
+# ---- Finding 2: categories rename/remove and subcategory config --------
+
+def test_categories_rename_moves_subcategories_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol", "Snacks"]})
+
+    result = runner.invoke(app, ["categories", "rename", "Groceries", "Food"])
+    assert result.exit_code == 0, result.output
+
+    subcats = Store(home=tmp_path).get_config("subcategories", {})
+    assert subcats.get("Food") == ["Alcohol", "Snacks"]
+    assert "Groceries" not in subcats
+
+
+def test_categories_rename_merges_subcategories_with_existing_new_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"], "Food": ["Snacks"]})
+
+    result = runner.invoke(app, ["categories", "rename", "Groceries", "Food"])
+    assert result.exit_code == 0, result.output
+
+    subcats = Store(home=tmp_path).get_config("subcategories", {})
+    assert set(subcats.get("Food", [])) == {"Alcohol", "Snacks"}
+    assert "Groceries" not in subcats
+
+
+def test_categories_remove_clears_subcategory_and_config(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Other"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+
+    result = runner.invoke(app, ["categories", "remove", "Groceries",
+                                 "--reassign-to", "Other"])
+    assert result.exit_code == 0, result.output
+
+    fresh = Store(home=tmp_path)
+    reloaded = fresh.get_transaction(t.id)
+    assert reloaded.category == "Other"
+    assert reloaded.subcategory == ""
+    mem = fresh.db.execute(
+        "SELECT category, subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert mem["category"] == "Other"
+    assert mem["subcategory"] == ""
+    subcats = fresh.get_config("subcategories", {})
+    assert "Groceries" not in subcats
+
+
+# ---- Finding 3: POST /api/rule/subcategory taxonomy validation ---------
+
+def test_post_rule_subcategory_rejects_unregistered_subcategory(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/rule/subcategory", method="POST",
+            data=json.dumps({"pattern": "SHETTY BEER SHOP", "kind": "merchant",
+                             "subcategory": "NotRegistered"}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=3)
+            assert False, "expected an HTTPError (400)"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+        reloaded = store.get_transaction(t.id)
+        assert reloaded.subcategory == ""
+        mem = store.db.execute(
+            "SELECT subcategory FROM memory WHERE pattern=?",
+            ("SHETTY BEER SHOP",)).fetchone()
+        assert mem["subcategory"] == ""
+    finally:
+        srv.shutdown()
+
+
+def test_post_rule_subcategory_allows_clearing_with_empty_string(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/rule/subcategory", method="POST",
+            data=json.dumps({"pattern": "SHETTY BEER SHOP", "kind": "merchant",
+                             "subcategory": ""}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True
+        reloaded = store.get_transaction(t.id)
+        assert reloaded.subcategory == ""
+    finally:
+        srv.shutdown()

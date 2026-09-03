@@ -132,15 +132,25 @@ class Handler(BaseHTTPRequestHandler):
             return None
         self.store.log_correction(t, category)
         propagated = 0
+        # A subcategory already on file for this pattern only survives if
+        # `category` matches what memory has for it — otherwise it no
+        # longer applies and must be cleared, both in memory and on this
+        # row.
+        sub = ""
         if t.payee_handle:
-            self.store.remember(t.payee_handle, category, kind="payee")
+            sub = self.store.existing_subcategory(t.payee_handle, "payee", category)
+            self.store.remember(t.payee_handle, category, kind="payee",
+                                subcategory=sub)
             propagated = self.store.propagate(t.payee_handle, category,
-                                              "payee", t.id)
+                                              "payee", t.id, subcategory=sub)
         elif t.merchant_norm:
-            self.store.remember(t.merchant_norm, category, kind="merchant")
+            sub = self.store.existing_subcategory(t.merchant_norm, "merchant", category)
+            self.store.remember(t.merchant_norm, category, kind="merchant",
+                                subcategory=sub)
             propagated = self.store.propagate(t.merchant_norm, category,
-                                              "merchant", t.id)
+                                              "merchant", t.id, subcategory=sub)
         t.category = category
+        t.subcategory = sub
         # is_transfer must track the category, not just the structural
         # auto-detector: a transaction the auto-detector couldn't pair
         # (e.g. a credit-card bill payment where only the card's own
@@ -170,6 +180,12 @@ class Handler(BaseHTTPRequestHandler):
         if row is None:
             self._send({"error": "unknown rule"}, status=404)
             return
+        if subcategory:
+            subcats = self.store.get_config("subcategories", {}) or {}
+            if subcategory not in subcats.get(row["category"], []):
+                self._send({"error": f"{subcategory} is not a subcategory of "
+                                     f"{row['category']}"}, status=400)
+                return
         self.store.remember(pattern, row["category"], kind=kind,
                             subcategory=subcategory)
         n = self.store.apply_subcategory(pattern, subcategory, kind)
