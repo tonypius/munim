@@ -19,6 +19,11 @@ SPECIAL = {
 
 MAX_LEAVES = 20   # labeling consistency collapses beyond this; hard limit
 
+# Subcategories only ever show up once you've already committed to a
+# parent head, so they get their own smaller, per-parent budget instead
+# of competing for the scarce top-level MAX_LEAVES slots.
+MAX_SUBCATEGORIES_PER_PARENT = 10
+
 
 def default_tree(categories: list[str]) -> dict[str, str]:
     return {c: SPECIAL.get(c, f"Expenses:{c}") for c in categories}
