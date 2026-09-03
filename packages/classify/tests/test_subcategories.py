@@ -753,3 +753,65 @@ def test_post_rule_subcategory_allows_clearing_with_empty_string(tmp_path):
         assert reloaded.subcategory == ""
     finally:
         srv.shutdown()
+
+
+# ---- Final branch review Fix 1: `munim learn` without --subcategory ----
+
+def test_learn_without_subcategory_flag_preserves_existing(tmp_path, monkeypatch):
+    """`munim learn` is the routine feedback channel called on every
+    confirm — omitting --subcategory must NOT wipe a subcategory already
+    taught for this pattern/category, mirroring review/_confirm_one/relabel."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries", kind="merchant",
+                    subcategory="Alcohol")
+    result = runner.invoke(app, ["learn", "SHETTY BEER SHOP", "Groceries"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    row = fresh.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert row["subcategory"] == "Alcohol"
+
+
+def test_learn_without_subcategory_flag_clears_on_different_category(tmp_path, monkeypatch):
+    """A category change via `munim learn` (no --subcategory) invalidates
+    whatever subcategory was taught under the old category."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries", "Dining"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries", kind="merchant",
+                    subcategory="Alcohol")
+    result = runner.invoke(app, ["learn", "SHETTY BEER SHOP", "Dining"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    row = fresh.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert row["subcategory"] == ""
+
+
+def test_api_transactions_filters_by_subcategory(tmp_path):
+    """/api/transactions must filter by subcategory server-side, before
+    the 300-row cap, not leave it to client-side filtering of the capped
+    page (final branch review Fix 3)."""
+    store = Store(home=tmp_path)
+    t1 = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                     description_raw="SHETTY BEER SHOP", category="Groceries",
+                     subcategory="Alcohol", merchant_norm="SHETTY BEER SHOP")
+    t2 = Transaction(date="2026-06-02", amount=150, direction=Direction.DEBIT,
+                     description_raw="BIGBASKET", category="Groceries",
+                     subcategory="Produce", merchant_norm="BIGBASKET")
+    store.upsert_transactions([t1, t2])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/transactions?subcategory=Alcohol",
+            timeout=3).read())
+        ids = [r["id"] for r in d["rows"]]
+        assert ids == [t1.id]
+    finally:
+        srv.shutdown()

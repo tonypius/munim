@@ -280,3 +280,66 @@ def test_api_transactions_rows_include_tags(tmp_path):
         assert d["rows"][0]["tags"] == ["Business"]
     finally:
         srv.shutdown()
+
+
+# ---- Final branch review Fix 3: /api/transactions tag filter ----------
+
+def test_api_transactions_filters_by_tag(tmp_path):
+    """/api/transactions must filter by tag server-side, before the
+    300-row cap, not leave it to client-side filtering of the capped
+    page (final branch review Fix 3)."""
+    store = Store(home=tmp_path)
+    t1 = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                     description_raw="UBER RIDE")
+    t2 = Transaction(date="2026-06-02", amount=250, direction=Direction.DEBIT,
+                     description_raw="GROCERY RUN")
+    store.upsert_transactions([t1, t2])
+    store.set_tags(t1.id, ["Business"])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/transactions?tag=Business",
+            timeout=3).read())
+        ids = [r["id"] for r in d["rows"]]
+        assert ids == [t1.id]
+    finally:
+        srv.shutdown()
+
+
+# ---- Final branch review Fix 4: `munim tag <id>` with zero tags -------
+
+def test_tag_command_with_no_tags_clears_all_tags(tmp_path, monkeypatch):
+    """`munim tag <txn-id>` with no tag arguments is the documented
+    clear-all-tags path (replace-all with an empty list); it must not
+    crash with a TypeError from iterating None."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business", "Spouse"])
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UBER RIDE")
+    store.upsert_transactions([t])
+    store.set_tags(t.id, ["Business", "Spouse"])
+    result = runner.invoke(app, ["tag", t.id])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert fresh.tags_for(t.id) == []
+
+
+# ---- Final branch review Fix 5: `munim tag --pattern` extra tokens ----
+
+def test_tag_command_with_pattern_and_multiple_tokens_errors(tmp_path, monkeypatch):
+    """--pattern takes exactly one tag; Typer misassigns the first of 2+
+    trailing tokens to txn_id instead of tags. That must surface as a
+    usage error, not silently drop the first token."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business", "Spouse"])
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="SOME PATTERN THING")
+    t.merchant_norm = "SOME PATTERN"
+    store.upsert_transactions([t])
+    result = runner.invoke(
+        app, ["tag", "--pattern", "SOME PATTERN", "Business", "Spouse"])
+    assert result.exit_code != 0
+    fresh = Store(home=tmp_path)
+    assert fresh.tags_for(t.id) == []

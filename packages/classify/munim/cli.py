@@ -483,6 +483,8 @@ def learn(pattern: str, category: str,
             raise typer.Exit(1)
     kind = "payee" if payee else "merchant"
     pattern = pattern.upper().strip()
+    if not subcategory:
+        subcategory = store.existing_subcategory(pattern, kind, category)
     store.remember(pattern, category, kind=kind, subcategory=subcategory)
     n = store.propagate(pattern, category, kind, subcategory=subcategory) \
         if propagate else 0
@@ -958,10 +960,16 @@ def tag_transaction(
     store = _store()
     curated = store.get_config("tags", [])
     if pattern:
-        # When using --pattern, the tag is in txn_id if tags is empty
+        # When using --pattern, a single trailing token is misassigned by
+        # Typer to txn_id instead of tags; reroute it. Two or more tokens
+        # is a usage error--pattern takes exactly one tag--surface it
+        # rather than silently dropping all but the last token.
         if not tags and txn_id:
             tags = [txn_id]
             txn_id = None
+        elif txn_id:
+            console.print("[red]--pattern takes exactly one tag.[/red]")
+            raise typer.Exit(1)
         tags = tags or []
         if len(tags) != 1:
             console.print("[red]--pattern takes exactly one tag.[/red]")
@@ -978,6 +986,7 @@ def tag_transaction(
     if not txn_id:
         console.print("[red]Need a transaction id, or --pattern.[/red]")
         raise typer.Exit(1)
+    tags = tags or []
     unknown = [t for t in tags if t not in curated]
     if unknown:
         console.print(f"[red]Not in your tag list (munim tags list): "

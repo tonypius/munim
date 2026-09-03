@@ -258,6 +258,8 @@ class Handler(BaseHTTPRequestHandler):
         # needs, once thousands of already-classified rows pile up.
         month, needle = q.get("month", ""), q.get("q", "").upper()
         category = q.get("category", "")
+        subcategory = q.get("subcategory", "")
+        tag = q.get("tag", "")
         all_txns = self.store.all_transactions()
         all_tags = self.store.all_tags()
         rows = []
@@ -269,11 +271,16 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             if category and category != "__none__" and t.category != category:
                 continue
+            if subcategory and t.subcategory != subcategory:
+                continue
+            txn_tags = all_tags.get(t.id, [])
+            if tag and tag not in txn_tags:
+                continue
             hay = f"{t.merchant_norm} {t.payee_handle} {t.category} " \
                   f"{t.description_raw}".upper()
             if needle and needle not in hay:
                 continue
-            rows.append(self._row(t, all_tags.get(t.id, [])))
+            rows.append(self._row(t, txn_tags))
             if len(rows) >= 300:
                 break
         months = sorted({t.date.isoformat()[:7] for t in all_txns}, reverse=True)

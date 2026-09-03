@@ -338,24 +338,25 @@ function refreshSubcategoryFilter(){
   const cat=$("#fCategory").value;
   const opts=(SUBCATS[cat]||[]);
   const sel=$("#fSubcategory");
+  const prev=sel.value;
   sel.hidden=opts.length===0;
   sel.innerHTML=`<option value="">All subcategories</option>`
     +opts.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join("");
+  if(opts.includes(prev))sel.value=prev;
 }
 async function transactions(){
   if(!TAGS.length)await loadTags();
   const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value,
         subcategory=$("#fSubcategory").value,tag=$("#fTag").value;
   refreshSubcategoryFilter();
-  const params=new URLSearchParams({month,q,category});
+  const params=new URLSearchParams({month,q,category,subcategory,tag});
   const d=await api(`/api/transactions?${params}`);
   if($("#fMonth").options.length===1)
     d.months.forEach(m=>$("#fMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
   if($("#fCategory").options.length===2)
     d.categories.forEach(c=>$("#fCategory")
       .insertAdjacentHTML("beforeend",`<option value="${esc(c)}">${esc(c)}</option>`));
-  let rows=subcategory?d.rows.filter(r=>r.subcategory===subcategory):d.rows;
-  if(tag)rows=rows.filter(r=>r.tags.includes(tag));
+  const rows=d.rows;
   $("#txnBody").innerHTML=rows.length?`<table><thead><tr>
     <th><input type="checkbox" id="txnSelectAll" title="Select all"></th>
     <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Head</th><th>Provenance</th><th>Account</th>
