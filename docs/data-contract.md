@@ -59,12 +59,19 @@ Prediction audit log: `txn_id`, `predicted_category`, `predicted_stage`,
 `predicted_confidence`, `final_category`, `was_correct`, `at`. This is the
 raw material for accuracy-over-time trend lines.
 
+### tags
+Manually-assigned ownership/purpose labels — `txn_id`, `tag`, primary key
+on the pair. Multi-valued (a transaction may carry any number of tags) and
+never touched by the pipeline, memory, or the community dictionary; every
+row here is a deliberate human action. Not a column on `transactions` —
+look tags up separately, the same way `corrections` already works.
+
 ### config
 Key/value JSON: `region`, `currency`, `categories`, `category_aliases`,
 `csv_profiles`, `schema_version`, `category_tree` (leaf -> ledger path under
 the five roots: Assets, Liabilities, Equity, Income, Expenses),
-`subcategories` (category -> list of allowed subcategory names), and
-`account_types` (account -> Assets | Liabilities).
+`subcategories` (category -> list of allowed subcategory names), `tags`
+(the curated tag list), and `account_types` (account -> Assets | Liabilities).
 
 The tree is a DISPLAY mapping consumed by exporters and the dashboard;
 `transactions.category` always stores the flat leaf. Consumers wanting

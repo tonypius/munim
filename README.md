@@ -143,6 +143,10 @@ The same directory also carries a **purpose-tail dictionary** (`purpose.yaml`) �
 
 Categories can carry an optional second level for finer-grained analysis — `Groceries` -> `Alcohol`/`Meat`/`Produce`, `Health` -> `Insurance` — taught the same way as categories (via a memory rule, so they propagate automatically) and applied as a deliberate separate pass, never inline during `munim review`. See `munim categories subcategories --help`.
 
+## Tags
+
+A transaction can also carry any number of manually-assigned tags — Business, Personal, a specific family member — for ownership/purpose tracking that's orthogonal to category. Tags are never auto-applied by any mechanism; every assignment is a deliberate action, one transaction at a time or an explicit one-time bulk apply. See `munim tags --help` and `munim tag --help`.
+
 ## Benchmarks
 
 Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [packages/classify/eval/RESULTS.md](packages/classify/eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.
