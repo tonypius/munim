@@ -46,6 +46,7 @@ class Transaction(BaseModel):
     merchant_norm: str = ""          # normalized merchant candidate
     payee_handle: str = ""           # UPI/P2P handle if extracted
     category: str = ""
+    subcategory: str = ""
     confidence: float = 0.0
     stage: Stage = Stage.NONE
     status: Status = Status.UNRESOLVED
