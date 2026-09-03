@@ -133,3 +133,38 @@ def test_propagate_carries_subcategory_to_unconfirmed_rows(tmp_path):
     reloaded = store.get_transaction(t.id)
     assert reloaded.category == "Groceries"
     assert reloaded.subcategory == "Alcohol"
+
+
+def test_memory_subcategories_returns_only_patterns_with_one_set(tmp_path):
+    store = Store(home=tmp_path)
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    store.remember("SWIGGY", "Dining")  # no subcategory
+    assert store.memory_subcategories("merchant") == {"SHETTY BEER SHOP": "Alcohol"}
+
+
+def test_apply_subcategory_updates_confirmed_rows_without_touching_category(tmp_path):
+    """The whole point: refining subcategory must reach already-reviewed
+    history, which propagate() deliberately excludes for category
+    changes. apply_subcategory() is a different, narrower operation."""
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                     description_raw="SHETTY BEER SHOP", category="Groceries",
+                     status="confirmed", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    n = store.apply_subcategory("SHETTY BEER SHOP", "Alcohol", "merchant")
+    assert n == 1
+    reloaded = store.get_transaction(t.id)
+    assert reloaded.subcategory == "Alcohol"
+    assert reloaded.category == "Groceries"       # untouched
+    assert reloaded.status.value == "confirmed"   # untouched
+
+
+def test_apply_subcategory_matches_on_payee_handle_for_payee_kind(tmp_path):
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                     description_raw="RAMESH KUMAR", category="Family & Friends")
+    t.merchant_norm, t.payee_handle = "", "RAMESH KUMAR"
+    store.upsert_transactions([t])
+    n = store.apply_subcategory("RAMESH KUMAR", "Loan Repayment", "payee")
+    assert n == 1
+    assert store.get_transaction(t.id).subcategory == "Loan Repayment"

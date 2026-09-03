@@ -222,6 +222,32 @@ class Store:
         ).fetchall()
         return {r["pattern"]: r["category"] for r in rows}
 
+    def memory_subcategories(self, kind: str = "merchant") -> dict[str, str]:
+        """pattern -> subcategory, for patterns that have one set. The
+        pipeline uses this to attach a subcategory when a memory rule
+        resolves a transaction — never for dictionary or purpose-tail
+        matches, which never carry one."""
+        rows = self.db.execute(
+            "SELECT pattern, subcategory FROM memory "
+            "WHERE kind=? AND subcategory != ''", (kind,)
+        ).fetchall()
+        return {r["pattern"]: r["subcategory"] for r in rows}
+
+    def apply_subcategory(self, pattern: str, subcategory: str,
+                          kind: str = "merchant") -> int:
+        """Backfill a subcategory onto every transaction matching pattern,
+        confirmed or not. Unlike propagate(), this never touches
+        category, status, stage, or confidence — subcategorizing is a
+        refinement on top of an already-settled category decision, not a
+        re-opening of it, so already-confirmed history is fair game."""
+        col = "payee_handle" if kind == "payee" else "merchant_norm"
+        cur = self.db.execute(
+            f"UPDATE transactions SET subcategory=? WHERE {col}=?",
+            (subcategory, pattern),
+        )
+        self.db.commit()
+        return cur.rowcount
+
     # ---- corrections (Loop 3) -----------------------------------------
     def log_correction(self, t: Transaction, final_category: str) -> None:
         self.db.execute(
