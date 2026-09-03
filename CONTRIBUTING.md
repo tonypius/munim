@@ -18,6 +18,14 @@ Rules:
 - Use categories from `packages/classify/munim/data/categories.yaml`.
 - One merchant per line; alphabetical within category preferred.
 
+The same directory also holds `purpose.yaml` — a separate, differently-
+shaped dictionary matched against the raw narration's trailing purpose
+word (e.g. "food", "taxi"), not the merchant name. Its rules differ from
+the merchant dictionary above: keys are whitespace-free uppercase
+keywords rather than merchant identifiers, and the 4-character minimum
+doesn't apply (real purpose words like "TEA" or "CAB" are 3 characters).
+Same PR process otherwise — patterns only, no personal data.
+
 ## 2. Labeled fixture data (the gold standard)
 
 Anonymized labeled statements make the benchmark real. To donate:

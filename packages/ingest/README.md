@@ -46,6 +46,21 @@ classify, same as any bank CSV export. Re-running the command overwrites
 an existing output file at the same path (with a visible warning first),
 so save any manual edits elsewhere before re-extracting.
 
+For a bank-account statement downloaded directly from the bank's own
+website as an Excel export (`.xls`/`.xlsx`) rather than emailed as a PDF,
+use `excel extract` instead — no password is ever requested, since these
+exports aren't encrypted the way emailed statement PDFs are:
+
+```sh
+munim-ingest excel extract statement.xls --bank hdfc-bank
+```
+
+Unlike `pdf extract`, this one needs bank-specific column knowledge
+(`--bank` is required); run `munim-ingest excel extract --help` for the
+current list of supported layouts. Same output convention as `pdf
+extract`: `statement.csv` next to the source by default, `--out` to
+choose another path.
+
 ### The app password / PDF password
 
 Gmail needs an [app password](https://support.google.com/accounts/answer/185833)

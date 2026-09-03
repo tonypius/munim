@@ -38,7 +38,7 @@ If you build on these tables, pin against the major version.
 | payee_handle | TEXT | person/payee string for P2P ('' if merchant) |
 | category | TEXT | current category ('' = uncategorized) |
 | confidence | REAL | 0–1 |
-| stage | TEXT | provenance: `structural`, `memory_exact`, `memory_fuzzy`, `dictionary`, `fallback`, `user`, `none` |
+| stage | TEXT | provenance: `structural`, `memory_exact`, `memory_fuzzy`, `dictionary`, `purpose`, `fallback`, `user`, `none` |
 | status | TEXT | `confirmed` (user-verified) / `provisional` (machine) / `unresolved` |
 | is_transfer | INTEGER | 1 = not spending; exclude from expense analytics |
 | is_recurring | INTEGER | 1 = detected subscription/EMI/salary pattern |

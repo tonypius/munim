@@ -53,10 +53,10 @@ This gives Munim a property almost no auto-categorizer can claim: **accuracy is 
                                                           miss  │  hit → done
                                                                 ▼
  ┌──────────────┐        ┌───────────────┐          ┌──────────────────┐
- │ 6 REVIEW     │   ←    │ 5 FALLBACK    │    ←     │ community        │
- │ 2 min/week,  │        │ TF-IDF + LR,  │          │ merchant         │
- │ confirms →   │        │ trained on    │          │ dictionary       │
- │ memory+model │        │ your labels   │          │ (seed knowledge) │
+ │ 6 REVIEW     │   ←    │ 5 FALLBACK    │    ←     │ dictionaries     │
+ │ 2 min/week,  │        │ TF-IDF + LR,  │          │ merchant +       │
+ │ confirms →   │        │ trained on    │          │ purpose-tail     │
+ │ memory+model │        │ your labels   │          │ keywords         │
  └──────────────┘        └───────────────┘          └──────────────────┘
 ```
 
@@ -136,6 +136,8 @@ Bank-string noise is regional. Munim ships **region packs** — pluggable normal
 - `us` — POS*/SQ*/TST* prefixes, trailing state codes, terminal IDs
 
 and a **community merchant dictionary** (`packages/classify/munim/data/dictionary/`) — versioned, human-reviewed pattern→category mappings. Contributing a pattern for your region is a 3-line PR and improves cold-start for everyone. Patterns only — never amounts, dates, or anything personal. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The same directory also carries a **purpose-tail dictionary** (`purpose.yaml`) — a last-resort signal for P2P payments to individuals who have no merchant identity of their own. Many UPI narrations carry a trailing purpose word ("...-336468937787-food Value Dt...") that the normalizer would otherwise discard entirely; matching it against this keyword list resolves transactions that memory, the merchant dictionary, and the fallback classifier all have nothing to go on for.
 
 ## Benchmarks
 

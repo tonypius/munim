@@ -42,6 +42,15 @@ loan repayment, or dinner. No model can resolve it; pretending otherwise
 produces confident garbage. Munim routes person-payments to a separate
 payee-memory that only the user can populate.
 
+The counterparty's *name* carries zero signal, but the raw narration
+often still does: a UPI app frequently appends the payer's own note —
+"food", "taxi", "medicine" — after the reference number, text the
+normalizer's merchant/payee extraction throws away entirely on its way to
+producing `RAMESH KUMAR`. That's not a model guessing at the merchant; it's
+the user's own contemporaneous note surviving in the data, which is why
+purpose-keyword matching is trusted as a last resort *after* payee memory
+misses, rather than treated as another kind of fallback guess.
+
 ## Why transfers come first
 
 Credit card bill payments, savings sweeps, and wallet top-ups are not

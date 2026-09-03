@@ -48,3 +48,17 @@ hash uniquely. Caveat: if your bank's CSV strips reference numbers AND
 you buy the same thing twice in one day for the same amount, the second
 row is dropped as a duplicate — check `munim stats` counts against your
 statement if your bank's exports are that bare.
+
+A sharper version of the same caveat bit for real, backfilling a second
+annual export in a *different format* than the first (a PDF-derived
+import, then later a raw CSV export covering an overlapping period from
+the bank's own site): the two sources described the same transaction
+differently — one carried a trailing `(Ref# ...)` and a foreign-currency
+suffix (`USD 58.42`) the other lacked entirely — so hash-based dedup
+matched nothing and would have silently created a full set of duplicates
+for the overlapping months. There's no generic fix for this in the
+importer, since the two description strings are genuinely different
+text; when combining exports from different sources for an overlapping
+period, reconcile on `(date, amount, direction)` as a multiset instead of
+trusting the hash, and treat the exact description text as informative,
+not load-bearing for identity.
