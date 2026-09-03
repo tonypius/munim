@@ -232,6 +232,7 @@ def reclassify():
     for t in txns:
         if not t.is_transfer:
             t.category, t.confidence, t.stage = "", 0.0, Stage.NONE
+            t.subcategory = ""
             t.status = Status.UNRESOLVED
     stats = Pipeline(store).run(txns)
     for t in txns:
@@ -444,6 +445,9 @@ def classify(store_results: bool = typer.Option(False, "--store",
 def learn(pattern: str, category: str,
           payee: bool = typer.Option(False, "--payee",
                                      help="Pattern is a person, not a merchant"),
+          subcategory: str = typer.Option(
+              "", "--subcategory",
+              help="Optional finer-grained head under category, e.g. Alcohol under Groceries"),
           propagate: bool = typer.Option(True,
                                          help="Apply to stored unconfirmed txns")):
     """Write one confirmed rule to memory — the feedback channel for host
@@ -456,12 +460,25 @@ def learn(pattern: str, category: str,
         console.print(f"[red]{category} is not in the taxonomy "
                       f"(munim categories list).[/red]")
         raise typer.Exit(1)
+    if subcategory:
+        subcats = store.get_config("subcategories", {}) or {}
+        if subcategory not in subcats.get(category, []):
+            console.print(
+                f"[red]{subcategory} is not a subcategory of {category} "
+                f"(munim categories subcategories list {category}).[/red]")
+            raise typer.Exit(1)
     kind = "payee" if payee else "merchant"
     pattern = pattern.upper().strip()
-    store.remember(pattern, category, kind=kind)
-    n = store.propagate(pattern, category, kind) if propagate else 0
-    console.print(f"[green]Learned: {pattern} → {category}[/green]"
+    store.remember(pattern, category, kind=kind, subcategory=subcategory)
+    n = store.propagate(pattern, category, kind, subcategory=subcategory) \
+        if propagate else 0
+    console.print(f"[green]Learned: {pattern} → {category}"
+                  + (f" / {subcategory}" if subcategory else "") + "[/green]"
                   + (f" ({n} stored transactions updated)" if n else ""))
+    if subcategory:
+        n_sub = store.apply_subcategory(pattern, subcategory, kind)
+        console.print(f"[dim]Subcategory applied to {n_sub} matching "
+                      "transactions (including already-confirmed ones).[/dim]")
 
 
 # --------------------------------------------------------------- categories

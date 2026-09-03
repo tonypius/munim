@@ -233,3 +233,66 @@ def test_pipeline_dictionary_match_ignores_unrelated_memory_subcategory(tmp_path
     assert t.category == "Dining"   # community dictionary hit
     assert t.stage == Stage.DICTIONARY
     assert t.subcategory == ""
+
+
+from typer.testing import CliRunner
+from munim.cli import app
+
+runner = CliRunner()
+
+
+def test_learn_with_subcategory_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    result = runner.invoke(app, ["learn", "SHETTY BEER SHOP", "Groceries",
+                                 "--subcategory", "Alcohol"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    row = fresh.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert row["subcategory"] == "Alcohol"
+
+
+def test_learn_rejects_subcategory_not_defined_under_category(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    result = runner.invoke(app, ["learn", "SOME SHOP", "Groceries",
+                                 "--subcategory", "NotARealSubcat"])
+    assert result.exit_code != 0
+
+
+def test_learn_subcategory_backfills_confirmed_transactions(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    status="confirmed", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    result = runner.invoke(app, ["learn", "SHETTY BEER SHOP", "Groceries",
+                                 "--subcategory", "Alcohol"])
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.subcategory == "Alcohol"
+    assert reloaded.status.value == "confirmed"
+
+
+def test_reclassify_resets_subcategory_on_unconfirmed_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("categories", ["Groceries"])
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="StaleGuess")
+    store.upsert_transactions([t])
+    result = runner.invoke(app, ["reclassify"])
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.subcategory == ""
