@@ -179,18 +179,20 @@ class Store:
         return [(r["merchant_norm"], r["category"]) for r in rows]
 
     # ---- memory (Loop 1) ----------------------------------------------
-    def remember(self, pattern: str, category: str, kind: str = "merchant") -> None:
+    def remember(self, pattern: str, category: str, kind: str = "merchant",
+                 subcategory: str = "") -> None:
         if not pattern:
             return
         self.db.execute(
-            "INSERT INTO memory(pattern,kind,category) VALUES(?,?,?) "
-            "ON CONFLICT(pattern,kind) DO UPDATE SET category=excluded.category",
-            (pattern.upper().strip(), kind, category),
+            "INSERT INTO memory(pattern,kind,category,subcategory) VALUES(?,?,?,?) "
+            "ON CONFLICT(pattern,kind) DO UPDATE SET category=excluded.category, "
+            "subcategory=excluded.subcategory",
+            (pattern.upper().strip(), kind, category, subcategory),
         )
         self.db.commit()
 
     def propagate(self, pattern: str, category: str, kind: str = "merchant",
-                  exclude_id: str = "") -> int:
+                  exclude_id: str = "", subcategory: str = "") -> int:
         """Apply a just-confirmed rule to every other unconfirmed transaction
         with the identical merchant/payee string. This is what makes bulk
         backfill sane: confirm SWIGGY once, all 40 occurrences resolve.
@@ -206,10 +208,10 @@ class Store:
         # check is_transfer, not the category string.
         is_transfer = 1 if category == "Transfers" else 0
         cur = self.db.execute(
-            f"UPDATE transactions SET category=?, status='confirmed', "
+            f"UPDATE transactions SET category=?, subcategory=?, status='confirmed', "
             f"stage='memory_exact', confidence=1.0, is_transfer=? "
             f"WHERE {col}=? AND status != 'confirmed' AND id != ?",
-            (category, is_transfer, pattern, exclude_id),
+            (category, subcategory, is_transfer, pattern, exclude_id),
         )
         self.db.commit()
         return cur.rowcount

@@ -102,3 +102,34 @@ def test_migrate_adds_subcategory_to_pre_existing_database(tmp_path):
     assert "subcategory" in _column_names(store.db, "memory")
     row = store.db.execute("SELECT * FROM transactions WHERE id='id1'").fetchone()
     assert row["subcategory"] == ""
+
+
+def test_remember_stores_subcategory(tmp_path):
+    store = Store(home=tmp_path)
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    row = store.db.execute(
+        "SELECT category, subcategory FROM memory WHERE pattern=?",
+        ("SHETTY BEER SHOP",)).fetchone()
+    assert row["category"] == "Groceries"
+    assert row["subcategory"] == "Alcohol"
+
+
+def test_remember_without_subcategory_leaves_it_blank(tmp_path):
+    store = Store(home=tmp_path)
+    store.remember("SWIGGY", "Dining")
+    row = store.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern=?", ("SWIGGY",)).fetchone()
+    assert row["subcategory"] == ""
+
+
+def test_propagate_carries_subcategory_to_unconfirmed_rows(tmp_path):
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                     description_raw="SHETTY BEER SHOP", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    n = store.propagate("SHETTY BEER SHOP", "Groceries", "merchant",
+                        subcategory="Alcohol")
+    assert n == 1
+    reloaded = store.get_transaction(t.id)
+    assert reloaded.category == "Groceries"
+    assert reloaded.subcategory == "Alcohol"
