@@ -214,3 +214,22 @@ def test_pipeline_leaves_subcategory_blank_without_a_memory_rule(tmp_path):
     Pipeline(store).run([t])
     assert t.category == "Dining"   # community dictionary hit
     assert t.subcategory == ""
+
+
+def test_pipeline_dictionary_match_ignores_unrelated_memory_subcategory(tmp_path):
+    """A dictionary-sourced match must never carry a subcategory, even
+    when subcat_rules is non-empty because SOME OTHER pattern has a
+    memory-taught subcategory. This proves the `match.source == "memory"`
+    guard in pipeline.py is load-bearing, not dead code — a version of
+    the pipeline with that guard deleted would also pass the blank-rule
+    test above (since subcat_rules would be empty there), but would fail
+    this one once subcat_rules is populated for an unrelated pattern."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.remember("SOME OTHER MERCHANT", "SomeCategory", subcategory="SomeSubcat")
+    t = Transaction(date="2026-06-01", amount=340, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY8102@okaxis-513324498812")
+    Pipeline(store).run([t])
+    assert t.category == "Dining"   # community dictionary hit
+    assert t.stage == Stage.DICTIONARY
+    assert t.subcategory == ""
