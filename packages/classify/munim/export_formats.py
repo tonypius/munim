@@ -43,7 +43,10 @@ def to_ledger(txns: list[Transaction], tree: dict | None = None,
     out = []
     for t in sorted(txns, key=lambda x: x.date):
         payee = t.merchant_norm or t.payee_handle or t.description_raw[:48]
-        path = resolve(tree, t.category).replace(" ", "-")
+        path = resolve(tree, t.category)
+        if t.subcategory:
+            path += f":{t.subcategory}"
+        path = path.replace(" ", "-")
         date = t.date.strftime("%Y/%m/%d")
         note = f"    ; stage: {t.stage.value}, status: {t.status.value}"
         amt = f"{t.amount:.2f} {t.currency}"

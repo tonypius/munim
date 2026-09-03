@@ -435,3 +435,23 @@ def test_api_transactions_row_includes_subcategory(tmp_path):
         assert d["rows"][0]["subcategory"] == "Alcohol"
     finally:
         srv.shutdown()
+
+
+def test_ledger_export_includes_subcategory_in_path():
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol", account="hdfc")
+    out = to_ledger([t], tree=default_tree(["Groceries"]))
+    assert "Expenses:Groceries:Alcohol" in out
+
+
+def test_ledger_export_omits_colon_when_no_subcategory():
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SWIGGY", category="Dining", account="hdfc")
+    out = to_ledger([t], tree=default_tree(["Dining"]))
+    assert "Expenses:Dining" in out
+    assert "Expenses:Dining:" not in out
