@@ -58,6 +58,11 @@ CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS tags (
+    txn_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (txn_id, tag)
+);
 """
 
 
@@ -278,3 +283,35 @@ class Store:
             "AVG(was_correct) AS accuracy FROM corrections "
             "WHERE predicted_category IS NOT NULL GROUP BY predicted_stage"
         ).fetchall()
+
+    # ---- tags -----------------------------------------------------------
+    def set_tags(self, txn_id: str, tags: list[str]) -> None:
+        """Replace-all: a transaction's tag set becomes exactly `tags`.
+        Manual assignment only — never called from the pipeline."""
+        self.db.execute("DELETE FROM tags WHERE txn_id=?", (txn_id,))
+        for tag in tags:
+            self.db.execute(
+                "INSERT OR IGNORE INTO tags(txn_id, tag) VALUES(?,?)",
+                (txn_id, tag))
+        self.db.commit()
+
+    def tags_for(self, txn_id: str) -> list[str]:
+        rows = self.db.execute(
+            "SELECT tag FROM tags WHERE txn_id=? ORDER BY tag", (txn_id,)
+        ).fetchall()
+        return [r["tag"] for r in rows]
+
+    def all_tags(self) -> dict[str, list[str]]:
+        """txn_id -> sorted tags, for every transaction that has at least
+        one. Bulk lookup to avoid N+1 queries when listing transactions."""
+        rows = self.db.execute(
+            "SELECT txn_id, tag FROM tags ORDER BY txn_id, tag").fetchall()
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r["txn_id"], []).append(r["tag"])
+        return out
+
+    def tag_counts(self) -> dict[str, int]:
+        rows = self.db.execute(
+            "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag").fetchall()
+        return {r["tag"]: r["n"] for r in rows}
