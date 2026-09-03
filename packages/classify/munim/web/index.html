@@ -57,6 +57,8 @@ tr:hover td{background:var(--paper-deep)}
 .tag.confirmed{color:var(--ink-green);border-color:var(--ink-green)}
 .tag.person{color:var(--pen-blue);border-color:var(--pen-blue)}
 .tag.broad{color:var(--ledger-red);border-color:var(--ledger-red);cursor:help}
+.subcat{color:var(--ink-soft);font-size:12.5px}
+.subcat select{font-size:12.5px;padding:2px 5px}
 .raw{color:var(--ink-soft);font:12px var(--mono);word-break:break-all}
 .controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 input,select{font:14px var(--mono);background:#fff;color:var(--ink);
@@ -157,6 +159,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <div class="controls">
     <select id="fMonth"><option value="">All months</option></select>
     <select id="fCategory"><option value="">All heads</option><option value="__none__">No head</option></select>
+    <select id="fSubcategory" hidden><option value="">All subcategories</option></select>
     <input id="fSearch" placeholder="Search merchant, category, raw text" size="34">
   </div>
   <div id="txnBody"></div>
@@ -316,8 +319,18 @@ $("#reviewBody").addEventListener("click",async e=>{
 });
 
 /* transactions */
+function refreshSubcategoryFilter(){
+  const cat=$("#fCategory").value;
+  const opts=(SUBCATS[cat]||[]);
+  const sel=$("#fSubcategory");
+  sel.hidden=opts.length===0;
+  sel.innerHTML=`<option value="">All subcategories</option>`
+    +opts.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join("");
+}
 async function transactions(){
-  const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value;
+  const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value,
+        subcategory=$("#fSubcategory").value;
+  refreshSubcategoryFilter();
   const params=new URLSearchParams({month,q,category});
   const d=await api(`/api/transactions?${params}`);
   if($("#fMonth").options.length===1)
@@ -325,13 +338,14 @@ async function transactions(){
   if($("#fCategory").options.length===2)
     d.categories.forEach(c=>$("#fCategory")
       .insertAdjacentHTML("beforeend",`<option value="${esc(c)}">${esc(c)}</option>`));
-  $("#txnBody").innerHTML=d.rows.length?`<table><thead><tr>
+  const rows=subcategory?d.rows.filter(r=>r.subcategory===subcategory):d.rows;
+  $("#txnBody").innerHTML=rows.length?`<table><thead><tr>
     <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Head</th><th>Provenance</th><th>Account</th>
-  </tr></thead><tbody>`+d.rows.map(r=>`<tr>
+  </tr></thead><tbody>`+rows.map(r=>`<tr>
     <td class="num">${r.date}</td>
     <td><div class="merchant">${esc(r.merchant)||"—"}${r.transfer?' <span class="tag">transfer</span>':""}${r.recurring?' <span class="tag">recurring</span>':""}</div><div class="raw">${esc(r.raw)}</div></td>
     ${amountCell(r)}
-    <td>${esc(r.category)||'<span class="tag">—</span>'}</td>
+    <td>${esc(r.category)||'<span class="tag">—</span>'}${r.subcategory?` <span class="subcat">· ${esc(r.subcategory)}</span>`:""}</td>
     <td>${statusTag(r)}</td>
     <td class="merchant">${esc(r.account)}</td>
   </tr>`).join("")+`</tbody></table>`
@@ -339,11 +353,12 @@ async function transactions(){
 }
 $("#fMonth")?.addEventListener("change",transactions);
 $("#fCategory")?.addEventListener("change",transactions);
+$("#fSubcategory")?.addEventListener("change",transactions);
 let deb;$("#fSearch")?.addEventListener("input",()=>{clearTimeout(deb);deb=setTimeout(transactions,250)});
 
 /* categories */
 async function categories(){
-  const d=await api("/api/categories");CATS=d.categories;
+  const d=await api("/api/categories");CATS=d.categories;SUBCATS=d.subcategories||{};
   const rows=Object.entries(d.usage).sort((a,b)=>b[1].total-a[1].total);
   const max=Math.max(1,...rows.map(([,u])=>u.total));
   $("#catBody").innerHTML=`<table><thead><tr>
@@ -367,14 +382,26 @@ function patternCell(r){
     +(r.broad?` <span class="tag broad" title="${esc(BROAD_TITLE)}">broad match</span>`:"")
     +`</td>`;
 }
+let SUBCATS={};
+function subcatCell(r){
+  const opts=(SUBCATS[r.category]||[]);
+  if(!opts.length)return `<td class="subcat">—</td>`;
+  const current=r.subcategory||"";
+  return `<td class="subcat"><select data-pattern="${esc(r.pattern)}" data-kind="${esc(r.kind)}">`
+    +`<option value=""${current===""?" selected":""}>—</option>`
+    +opts.map(o=>`<option value="${esc(o)}"${o===current?" selected":""}>${esc(o)}</option>`).join("")
+    +`</select></td>`;
+}
 async function rules(){
   const d=await api("/api/rules");
   const learned=d.learned.length?`<table><thead><tr>
-    <th>Pattern</th><th>Kind</th><th>Head</th><th>Learned</th>
+    <th>Pattern</th><th>Kind</th><th>Head</th><th>Subcategory</th><th>Learned</th>
   </tr></thead><tbody>`+d.learned.map(r=>`<tr>
     ${patternCell(r)}
     <td>${r.kind==="payee"?'<span class="tag person">person</span>':'<span class="tag">merchant</span>'}</td>
-    <td>${esc(r.category)}</td><td class="num">${esc(r.created_at).slice(0,10)}</td>
+    <td>${esc(r.category)}</td>
+    ${subcatCell(r)}
+    <td class="num">${esc(r.created_at).slice(0,10)}</td>
   </tr>`).join("")+`</tbody></table>`
   :`<p class="empty">Nothing learned yet — confirm entries in Review.</p>`;
   $("#rulesBody").innerHTML=`<h2 style="font-size:16px">Learned (${d.learned.length})</h2>${learned}
@@ -383,6 +410,20 @@ async function rules(){
   d.dictionary.map(r=>`<tr>${patternCell(r)}<td>${esc(r.category)}</td></tr>`).join("")+
   `</tbody></table>`;
 }
+$("#rulesBody").addEventListener("change",async e=>{
+  const sel=e.target.closest("select[data-pattern]");if(!sel)return;
+  sel.disabled=true;
+  try{
+    await api("/api/rule/subcategory",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pattern:sel.dataset.pattern,kind:sel.dataset.kind,
+                           subcategory:sel.value})});
+  }catch(err){
+    alert("Couldn't update subcategory: "+err.message);
+  }finally{
+    sel.disabled=false;
+  }
+});
 
 /* contribute */
 async function contribute(){

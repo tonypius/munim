@@ -420,3 +420,18 @@ def test_post_rule_subcategory_updates_rule_and_backfills(tmp_path):
         assert reloaded.category == "Groceries"
     finally:
         srv.shutdown()
+
+
+def test_api_transactions_row_includes_subcategory(tmp_path):
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/transactions", timeout=3).read())
+        assert d["rows"][0]["subcategory"] == "Alcohol"
+    finally:
+        srv.shutdown()
