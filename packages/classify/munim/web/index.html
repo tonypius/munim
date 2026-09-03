@@ -57,6 +57,7 @@ tr:hover td{background:var(--paper-deep)}
 .tag.confirmed{color:var(--ink-green);border-color:var(--ink-green)}
 .tag.person{color:var(--pen-blue);border-color:var(--pen-blue)}
 .tag.broad{color:var(--ledger-red);border-color:var(--ledger-red);cursor:help}
+.tagchips{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
 .subcat{color:var(--ink-soft);font-size:12.5px}
 .subcat select{font-size:12.5px;padding:2px 5px}
 .raw{color:var(--ink-soft);font:12px var(--mono);word-break:break-all}
@@ -160,7 +161,14 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
     <select id="fMonth"><option value="">All months</option></select>
     <select id="fCategory"><option value="">All heads</option><option value="__none__">No head</option></select>
     <select id="fSubcategory" hidden><option value="">All subcategories</option></select>
+    <select id="fTag"><option value="">All tags</option></select>
     <input id="fSearch" placeholder="Search merchant, category, raw text" size="34">
+  </div>
+  <div class="controls" id="txnBulkBar" hidden>
+    <span id="txnBulkCount"></span>
+    <select id="txnBulkTag"></select>
+    <button id="txnBulkAdd" class="confirm">Add tag</button>
+    <button id="txnBulkRemove">Remove tag</button>
   </div>
   <div id="txnBody"></div>
 </section>
@@ -319,6 +327,13 @@ $("#reviewBody").addEventListener("click",async e=>{
 });
 
 /* transactions */
+let TAGS=[];
+async function loadTags(){
+  const d=await api("/api/tags");TAGS=d.tags;
+  $("#fTag").innerHTML=`<option value="">All tags</option>`+
+    TAGS.map(t=>`<option value="${esc(t)}">${esc(t)} (${d.counts[t]||0})</option>`).join("");
+  $("#txnBulkTag").innerHTML=TAGS.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
+}
 function refreshSubcategoryFilter(){
   const cat=$("#fCategory").value;
   const opts=(SUBCATS[cat]||[]);
@@ -328,8 +343,9 @@ function refreshSubcategoryFilter(){
     +opts.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join("");
 }
 async function transactions(){
+  if(!TAGS.length)await loadTags();
   const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value,
-        subcategory=$("#fSubcategory").value;
+        subcategory=$("#fSubcategory").value,tag=$("#fTag").value;
   refreshSubcategoryFilter();
   const params=new URLSearchParams({month,q,category});
   const d=await api(`/api/transactions?${params}`);
@@ -338,23 +354,55 @@ async function transactions(){
   if($("#fCategory").options.length===2)
     d.categories.forEach(c=>$("#fCategory")
       .insertAdjacentHTML("beforeend",`<option value="${esc(c)}">${esc(c)}</option>`));
-  const rows=subcategory?d.rows.filter(r=>r.subcategory===subcategory):d.rows;
+  let rows=subcategory?d.rows.filter(r=>r.subcategory===subcategory):d.rows;
+  if(tag)rows=rows.filter(r=>r.tags.includes(tag));
   $("#txnBody").innerHTML=rows.length?`<table><thead><tr>
+    <th><input type="checkbox" id="txnSelectAll" title="Select all"></th>
     <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Head</th><th>Provenance</th><th>Account</th>
-  </tr></thead><tbody>`+rows.map(r=>`<tr>
+  </tr></thead><tbody>`+rows.map(r=>`<tr data-id="${r.id}">
+    <td><input type="checkbox" class="txnRowSel" value="${r.id}"></td>
     <td class="num">${r.date}</td>
-    <td><div class="merchant">${esc(r.merchant)||"—"}${r.transfer?' <span class="tag">transfer</span>':""}${r.recurring?' <span class="tag">recurring</span>':""}</div><div class="raw">${esc(r.raw)}</div></td>
+    <td><div class="merchant">${esc(r.merchant)||"—"}${r.transfer?' <span class="tag">transfer</span>':""}${r.recurring?' <span class="tag">recurring</span>':""}</div><div class="raw">${esc(r.raw)}</div>${r.tags.length?`<div class="tagchips">`+r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join("")+`</div>`:""}</td>
     ${amountCell(r)}
     <td>${esc(r.category)||'<span class="tag">—</span>'}${r.subcategory?` <span class="subcat">· ${esc(r.subcategory)}</span>`:""}</td>
     <td>${statusTag(r)}</td>
     <td class="merchant">${esc(r.account)}</td>
   </tr>`).join("")+`</tbody></table>`
   :`<p class="empty">No entries match.</p>`;
+  updateTxnBulkBar();
+}
+function updateTxnBulkBar(){
+  const n=document.querySelectorAll("#txnBody .txnRowSel:checked").length;
+  $("#txnBulkBar").hidden=n===0;
+  $("#txnBulkCount").textContent=n===1?"1 selected":`${n} selected`;
 }
 $("#fMonth")?.addEventListener("change",transactions);
 $("#fCategory")?.addEventListener("change",transactions);
 $("#fSubcategory")?.addEventListener("change",transactions);
+$("#fTag")?.addEventListener("change",transactions);
 let deb;$("#fSearch")?.addEventListener("input",()=>{clearTimeout(deb);deb=setTimeout(transactions,250)});
+$("#txnBody").addEventListener("change",e=>{
+  if(e.target.id==="txnSelectAll"){
+    document.querySelectorAll("#txnBody .txnRowSel")
+      .forEach(cb=>cb.checked=e.target.checked);
+  }
+  updateTxnBulkBar();
+});
+async function bulkTag(action){
+  const ids=[...document.querySelectorAll("#txnBody .txnRowSel:checked")].map(cb=>cb.value);
+  if(!ids.length)return;
+  const tag=$("#txnBulkTag").value;
+  try{
+    await api("/api/tags/bulk",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ids,tag,action})});
+    await loadTags();await transactions();
+  }catch(err){
+    alert("Tag update failed: "+err.message);
+  }
+}
+$("#txnBulkAdd")?.addEventListener("click",()=>bulkTag("add"));
+$("#txnBulkRemove")?.addEventListener("click",()=>bulkTag("remove"));
 
 /* categories */
 async function categories(){
