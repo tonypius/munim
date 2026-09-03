@@ -34,13 +34,15 @@ CREATE TABLE IF NOT EXISTS transactions (
     stage TEXT DEFAULT 'none',
     status TEXT DEFAULT 'unresolved',
     is_transfer INTEGER DEFAULT 0,
-    is_recurring INTEGER DEFAULT 0
+    is_recurring INTEGER DEFAULT 0,
+    subcategory TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS memory (
     pattern TEXT NOT NULL,          -- normalized merchant string or payee handle
     kind TEXT NOT NULL,             -- 'merchant' | 'payee'
     category TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
+    subcategory TEXT DEFAULT '',
     PRIMARY KEY (pattern, kind)
 );
 CREATE TABLE IF NOT EXISTS corrections (
@@ -70,6 +72,26 @@ class Store:
                                   check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """One-time column additions for databases created before a given
+        column existed. SQLite has no ADD COLUMN IF NOT EXISTS, so each
+        addition needs its own existence check. New columns always land
+        at the physical end of the table, same as a fresh CREATE TABLE
+        with the column listed last — keeps positional INSERTs valid
+        either way."""
+        def has_column(table: str, col: str) -> bool:
+            return any(r["name"] == col for r in
+                       self.db.execute(f"PRAGMA table_info({table})").fetchall())
+
+        if not has_column("transactions", "subcategory"):
+            self.db.execute(
+                "ALTER TABLE transactions ADD COLUMN subcategory TEXT DEFAULT ''")
+        if not has_column("memory", "subcategory"):
+            self.db.execute(
+                "ALTER TABLE memory ADD COLUMN subcategory TEXT DEFAULT ''")
+        self.db.commit()
 
     # ---- config -------------------------------------------------------
     def set_config(self, key: str, value) -> None:
@@ -91,13 +113,13 @@ class Store:
         for t in txns:
             try:
                 self.db.execute(
-                    "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         t.id, t.date.isoformat(), t.amount, t.currency,
                         t.direction.value, t.description_raw, t.account, t.balance,
                         t.merchant_norm, t.payee_handle, t.category, t.confidence,
                         t.stage.value, t.status.value,
-                        int(t.is_transfer), int(t.is_recurring),
+                        int(t.is_transfer), int(t.is_recurring), t.subcategory,
                     ),
                 )
                 inserted += 1
@@ -127,6 +149,7 @@ class Store:
             category=r["category"], confidence=r["confidence"],
             stage=Stage(r["stage"]), status=Status(r["status"]),
             is_transfer=bool(r["is_transfer"]), is_recurring=bool(r["is_recurring"]),
+            subcategory=r["subcategory"],
         )
 
     def all_transactions(self) -> list[Transaction]:
