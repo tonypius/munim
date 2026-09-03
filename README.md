@@ -139,6 +139,10 @@ and a **community merchant dictionary** (`packages/classify/munim/data/dictionar
 
 The same directory also carries a **purpose-tail dictionary** (`purpose.yaml`) — a last-resort signal for P2P payments to individuals who have no merchant identity of their own. Many UPI narrations carry a trailing purpose word ("...-336468937787-food Value Dt...") that the normalizer would otherwise discard entirely; matching it against this keyword list resolves transactions that memory, the merchant dictionary, and the fallback classifier all have nothing to go on for.
 
+## Subcategories
+
+Categories can carry an optional second level for finer-grained analysis — `Groceries` -> `Alcohol`/`Meat`/`Produce`, `Health` -> `Insurance` — taught the same way as categories (via a memory rule, so they propagate automatically) and applied as a deliberate separate pass, never inline during `munim review`. See `munim categories subcategories --help`.
+
 ## Benchmarks
 
 Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [packages/classify/eval/RESULTS.md](packages/classify/eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.

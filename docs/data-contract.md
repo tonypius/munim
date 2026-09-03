@@ -37,6 +37,7 @@ If you build on these tables, pin against the major version.
 | merchant_norm | TEXT | normalized merchant candidate ('' if P2P) |
 | payee_handle | TEXT | person/payee string for P2P ('' if merchant) |
 | category | TEXT | current category ('' = uncategorized) |
+| subcategory | TEXT | optional second level under category ('' = unrefined); see `config.subcategories` |
 | confidence | REAL | 0–1 |
 | stage | TEXT | provenance: `structural`, `memory_exact`, `memory_fuzzy`, `dictionary`, `purpose`, `fallback`, `user`, `none` |
 | status | TEXT | `confirmed` (user-verified) / `provisional` (machine) / `unresolved` |
@@ -49,8 +50,9 @@ signal (confirmed rows are ground truth, provisional rows are suggestions).
 
 ### memory
 User-confirmed rules. `pattern` (uppercase), `kind` (`merchant`/`payee`),
-`category`, `created_at`. Treat as read-only from outside — writing rules
-without a confirmation event breaks the provenance guarantees.
+`category`, `subcategory` (optional, '' = none), `created_at`. Treat as
+read-only from outside — writing rules without a confirmation event
+breaks the provenance guarantees.
 
 ### corrections
 Prediction audit log: `txn_id`, `predicted_category`, `predicted_stage`,
@@ -60,7 +62,8 @@ raw material for accuracy-over-time trend lines.
 ### config
 Key/value JSON: `region`, `currency`, `categories`, `category_aliases`,
 `csv_profiles`, `schema_version`, `category_tree` (leaf -> ledger path under
-the five roots: Assets, Liabilities, Equity, Income, Expenses), and
+the five roots: Assets, Liabilities, Equity, Income, Expenses),
+`subcategories` (category -> list of allowed subcategory names), and
 `account_types` (account -> Assets | Liabilities).
 
 The tree is a DISPLAY mapping consumed by exporters and the dashboard;

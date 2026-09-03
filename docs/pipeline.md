@@ -3,6 +3,11 @@
 Every transaction flows through these stages in order. The first stage that
 resolves it wins, and the decision carries provenance (stage + confidence).
 
+A matched memory rule (stage 4) may also carry a `subcategory` — an
+optional, user-taught second level under the category (e.g.
+`Groceries` -> `Alcohol`), applied only when the rule itself has one. No
+other stage ever sets `subcategory`.
+
 | # | Stage | Module | Resolves | Status produced |
 |---|-------|--------|----------|-----------------|
 | 1 | Ingest | `packages/classify/munim/ingest/` | CSV -> canonical `Transaction` | — |
