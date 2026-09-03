@@ -173,3 +173,44 @@ def test_apply_subcategory_matches_on_payee_handle_for_payee_kind(tmp_path):
 def test_max_subcategories_per_parent_constant_exists():
     from munim.tree import MAX_SUBCATEGORIES_PER_PARENT
     assert MAX_SUBCATEGORIES_PER_PARENT == 10
+
+
+from munim.pipeline import Pipeline
+from munim.schema import Stage
+
+
+def test_pipeline_attaches_subcategory_from_memory_exact_match(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP")
+    Pipeline(store).run([t])
+    assert t.category == "Groceries"
+    assert t.subcategory == "Alcohol"
+    assert t.stage == Stage.MEMORY_EXACT
+
+
+def test_pipeline_attaches_subcategory_for_payee_kind_match(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.remember("RAMESH KUMAR", "Family & Friends", kind="payee",
+                   subcategory="Loan Repayment")
+    t = Transaction(date="2026-06-01", amount=5000, direction=Direction.DEBIT,
+                    description_raw="UPI-RAMESH KUMAR@okhdfcbank-513324498817")
+    Pipeline(store).run([t])
+    assert t.category == "Family & Friends"
+    assert t.subcategory == "Loan Repayment"
+
+
+def test_pipeline_leaves_subcategory_blank_without_a_memory_rule(tmp_path):
+    """Dictionary and fallback matches never carry a subcategory —
+    scoped to memory rules only, since community knowledge and ML
+    guesses aren't precise enough for this level of detail."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    t = Transaction(date="2026-06-01", amount=340, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY8102@okaxis-513324498812")
+    Pipeline(store).run([t])
+    assert t.category == "Dining"   # community dictionary hit
+    assert t.subcategory == ""

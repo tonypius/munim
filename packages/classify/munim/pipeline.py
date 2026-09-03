@@ -57,6 +57,8 @@ class Pipeline:
             threshold=store.get_config("fuzzy_threshold", 90),
         )
         self.payee_rules = store.memory_rules("payee")
+        self.subcat_rules = store.memory_subcategories("merchant")
+        self.payee_subcat_rules = store.memory_subcategories("payee")
         self.purpose_matcher = PurposeMatcher(
             threshold=store.get_config("fuzzy_threshold", 90))
         # User category renames: dictionary emits standard taxonomy names;
@@ -93,7 +95,9 @@ class Pipeline:
             if t.payee_handle:
                 if t.payee_handle in self.payee_rules:
                     self._assign(t, self.payee_rules[t.payee_handle],
-                                 Stage.MEMORY_EXACT, 1.0)
+                                 Stage.MEMORY_EXACT, 1.0,
+                                 subcategory=self.payee_subcat_rules.get(
+                                     t.payee_handle, ""))
                     stats.bump(Stage.MEMORY_EXACT)
                 elif not self._try_purpose(t, stats):
                     stats.bump(Stage.NONE)
@@ -106,7 +110,10 @@ class Pipeline:
                          match.source == "memory"
                          else Stage.MEMORY_FUZZY if match.source == "memory"
                          else Stage.DICTIONARY)
-                self._assign(t, match.category, stage, match.score / 100)
+                subcat = (self.subcat_rules.get(match.matched_pattern, "")
+                         if match.source == "memory" else "")
+                self._assign(t, match.category, stage, match.score / 100,
+                             subcategory=subcat)
                 stats.bump(stage)
                 continue
 
@@ -115,7 +122,9 @@ class Pipeline:
             if self._looks_like_person(t.merchant_norm):
                 if t.merchant_norm in self.payee_rules:
                     self._assign(t, self.payee_rules[t.merchant_norm],
-                                 Stage.MEMORY_EXACT, 1.0)
+                                 Stage.MEMORY_EXACT, 1.0,
+                                 subcategory=self.payee_subcat_rules.get(
+                                     t.merchant_norm, ""))
                     stats.bump(Stage.MEMORY_EXACT)
                 else:
                     t.payee_handle, t.merchant_norm = t.merchant_norm, ""
@@ -159,8 +168,9 @@ class Pipeline:
         return not any(w in BUSINESS_WORDS for w in merchant.split())
 
     def _assign(self, t: Transaction, category: str, stage: Stage,
-                conf: float) -> None:
+                conf: float, subcategory: str = "") -> None:
         t.category = self.aliases.get(category, category)
+        t.subcategory = subcategory
         t.stage = stage
         t.confidence = round(conf, 3)
         # A user-memory exact hit is as good as confirmed — the user taught it.
