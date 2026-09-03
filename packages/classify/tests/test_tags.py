@@ -186,3 +186,97 @@ def test_tag_command_with_pattern_bulk_applies(tmp_path, monkeypatch):
     fresh = Store(home=tmp_path)
     assert fresh.tags_for(t1.id) == ["Business"]
     assert fresh.tags_for(t2.id) == ["Business"]
+
+
+import json
+import threading
+import urllib.request
+from http.server import HTTPServer
+from munim.web.server import Handler
+
+
+def _server(store):
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def test_api_tags_returns_curated_list_and_counts(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business", "Spouse"])
+    store.set_tags("txn1", ["Business"])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/tags", timeout=3).read())
+        assert d["tags"] == ["Business", "Spouse"]
+        assert d["counts"] == {"Business": 1}
+    finally:
+        srv.shutdown()
+
+
+def test_post_api_tag_sets_tags_on_one_transaction(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UBER RIDE")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/tag", method="POST",
+            data=json.dumps({"id": t.id, "tags": ["Business"]}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True
+        assert store.tags_for(t.id) == ["Business"]
+    finally:
+        srv.shutdown()
+
+
+def test_post_api_tags_bulk_add_and_remove(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    t1 = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                     description_raw="A")
+    t2 = Transaction(date="2026-06-02", amount=200, direction=Direction.DEBIT,
+                     description_raw="B")
+    store.upsert_transactions([t1, t2])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/tags/bulk", method="POST",
+            data=json.dumps({"ids": [t1.id, t2.id], "tag": "Business",
+                             "action": "add"}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True and res["updated"] == 2
+        assert store.tags_for(t1.id) == ["Business"]
+        assert store.tags_for(t2.id) == ["Business"]
+
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/tags/bulk", method="POST",
+            data=json.dumps({"ids": [t1.id], "tag": "Business",
+                             "action": "remove"}).encode(),
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=3)
+        assert store.tags_for(t1.id) == []
+        assert store.tags_for(t2.id) == ["Business"]
+    finally:
+        srv.shutdown()
+
+
+def test_api_transactions_rows_include_tags(tmp_path):
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UBER RIDE")
+    store.upsert_transactions([t])
+    store.set_tags(t.id, ["Business"])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/transactions", timeout=3).read())
+        assert d["rows"][0]["tags"] == ["Business"]
+    finally:
+        srv.shutdown()

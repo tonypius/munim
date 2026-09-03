@@ -60,6 +60,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(self._categories())
         elif route == "/api/rules":
             self._send(self._rules())
+        elif route == "/api/tags":
+            self._send(self._tags())
         elif route == "/api/accounts":
             self._send(self._accounts())
         elif route == "/api/dashboard":
@@ -75,6 +77,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/rule/subcategory":
             self._handle_rule_subcategory()
+            return
+        if path == "/api/tag":
+            self._handle_tag()
+            return
+        if path == "/api/tags/bulk":
+            self._handle_tags_bulk()
             return
         if path != "/api/confirm":
             self._send({"error": "not found"}, status=404)
@@ -164,6 +172,41 @@ class Handler(BaseHTTPRequestHandler):
         self.store.update_transaction(t)
         return propagated
 
+    def _handle_tag(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        txn_id = data.get("id")
+        tags = data.get("tags") or []
+        curated = self.store.get_config("tags", [])
+        unknown = [t for t in tags if t not in curated]
+        if not txn_id or unknown:
+            self._send({"error": "need a valid id and known tags"}, status=400)
+            return
+        self.store.set_tags(txn_id, tags)
+        self._send({"ok": True})
+
+    def _handle_tags_bulk(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        ids = data.get("ids") or []
+        tag = data.get("tag")
+        action = data.get("action")
+        curated = self.store.get_config("tags", [])
+        if not ids or tag not in curated or action not in ("add", "remove"):
+            self._send({"error": "need ids, a known tag, and add/remove"},
+                       status=400)
+            return
+        updated = 0
+        for txn_id in ids:
+            current = set(self.store.tags_for(txn_id))
+            if action == "add":
+                current.add(tag)
+            else:
+                current.discard(tag)
+            self.store.set_tags(txn_id, sorted(current))
+            updated += 1
+        self._send({"ok": True, "updated": updated})
+
     def _handle_rule_subcategory(self):
         """Set a rule's subcategory (keeping its existing category) and
         backfill every currently-matching transaction, confirmed or not
@@ -216,6 +259,7 @@ class Handler(BaseHTTPRequestHandler):
         month, needle = q.get("month", ""), q.get("q", "").upper()
         category = q.get("category", "")
         all_txns = self.store.all_transactions()
+        all_tags = self.store.all_tags()
         rows = []
         for t in sorted(all_txns, key=lambda x: x.date, reverse=True):
             iso = t.date.isoformat()
@@ -229,7 +273,7 @@ class Handler(BaseHTTPRequestHandler):
                   f"{t.description_raw}".upper()
             if needle and needle not in hay:
                 continue
-            rows.append(self._row(t))
+            rows.append(self._row(t, all_tags.get(t.id, [])))
             if len(rows) >= 300:
                 break
         months = sorted({t.date.isoformat()[:7] for t in all_txns}, reverse=True)
@@ -316,6 +360,10 @@ class Handler(BaseHTTPRequestHandler):
                 key=lambda r: (r["category"], r["pattern"])),
         }
 
+    def _tags(self):
+        return {"tags": self.store.get_config("tags", []),
+                "counts": self.store.tag_counts()}
+
     def _accounts(self):
         from ..doctor import _month_range
         by_acct: dict[str, list] = defaultdict(list)
@@ -390,7 +438,7 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     @staticmethod
-    def _row(t):
+    def _row(t, tags=()):
         return {
             "id": t.id, "date": t.date.isoformat(), "amount": t.amount,
             "currency": t.currency, "direction": t.direction.value,
@@ -401,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
             "stage": t.stage.value, "status": t.status.value,
             "account": t.account, "transfer": t.is_transfer,
             "recurring": t.is_recurring, "raw": t.description_raw,
+            "tags": list(tags),
         }
 
 
