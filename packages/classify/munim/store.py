@@ -131,10 +131,11 @@ class Store:
     def update_transaction(self, t: Transaction) -> None:
         self.db.execute(
             "UPDATE transactions SET merchant_norm=?, payee_handle=?, category=?, "
-            "confidence=?, stage=?, status=?, is_transfer=?, is_recurring=? WHERE id=?",
+            "subcategory=?, confidence=?, stage=?, status=?, is_transfer=?, "
+            "is_recurring=? WHERE id=?",
             (
-                t.merchant_norm, t.payee_handle, t.category, t.confidence,
-                t.stage.value, t.status.value,
+                t.merchant_norm, t.payee_handle, t.category, t.subcategory,
+                t.confidence, t.stage.value, t.status.value,
                 int(t.is_transfer), int(t.is_recurring), t.id,
             ),
         )

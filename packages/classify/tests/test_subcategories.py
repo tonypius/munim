@@ -51,6 +51,21 @@ def test_upsert_and_get_transaction_roundtrips_subcategory(tmp_path):
     assert reloaded.subcategory == "Alcohol"
 
 
+def test_update_transaction_writes_subcategory(tmp_path):
+    """After calling update_transaction with a non-default subcategory,
+    the value must be persisted to the database and readable via
+    get_transaction."""
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                     description_raw="SHETTY BEER SHOP", category="Groceries")
+    store.upsert_transactions([t])
+    t.subcategory = "Alcohol"
+    store.update_transaction(t)
+    reloaded = store.get_transaction(t.id)
+    assert reloaded is not None
+    assert reloaded.subcategory == "Alcohol"
+
+
 def test_migrate_adds_subcategory_to_pre_existing_database(tmp_path):
     """Simulate a database created before this column existed: build the
     old schema by hand, then open it with Store and confirm the column
