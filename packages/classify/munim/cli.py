@@ -942,6 +942,51 @@ def tags_remove(name: str):
                   f"cleared from {n} transactions.")
 
 
+@app.command("tag")
+def tag_transaction(
+    txn_id: str = typer.Argument(None, help="Transaction id (omit when using --pattern)"),
+    tags: list[str] = typer.Argument(None, help="Tags to set (replaces existing)"),
+    pattern: str = typer.Option(
+        "", "--pattern",
+        help="Bulk one-time apply to every transaction matching this merchant/payee text"),
+    payee: bool = typer.Option(False, "--payee",
+                               help="Pattern is a person, not a merchant (only with --pattern)"),
+):
+    """Set a transaction's tags, or bulk-apply one tag to every currently-
+    matching transaction with --pattern. Manual only — never saved as a
+    rule, never affects future imports."""
+    store = _store()
+    curated = store.get_config("tags", [])
+    if pattern:
+        # When using --pattern, the tag is in txn_id if tags is empty
+        if not tags and txn_id:
+            tags = [txn_id]
+            txn_id = None
+        tags = tags or []
+        if len(tags) != 1:
+            console.print("[red]--pattern takes exactly one tag.[/red]")
+            raise typer.Exit(1)
+        tag = tags[0]
+        if tag not in curated:
+            console.print(f"[red]{tag} is not a tag (munim tags list).[/red]")
+            raise typer.Exit(1)
+        n = store.apply_tag_to_pattern(pattern.upper().strip(), tag,
+                                       "payee" if payee else "merchant")
+        console.print(f"[green]Tagged {n} matching transactions with "
+                      f"{tag}.[/green]")
+        return
+    if not txn_id:
+        console.print("[red]Need a transaction id, or --pattern.[/red]")
+        raise typer.Exit(1)
+    unknown = [t for t in tags if t not in curated]
+    if unknown:
+        console.print(f"[red]Not in your tag list (munim tags list): "
+                      f"{', '.join(unknown)}[/red]")
+        raise typer.Exit(1)
+    store.set_tags(txn_id, tags)
+    console.print(f"[green]{txn_id} → {', '.join(tags) or '(no tags)'}[/green]")
+
+
 # --------------------------------------------------------------------- eval
 @app.command("eval")
 def run_eval(fixture: Path = typer.Option(None, help="Labeled fixture CSV")):

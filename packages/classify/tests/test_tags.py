@@ -144,3 +144,45 @@ def test_tags_remove_deletes_from_taxonomy_and_all_transactions(tmp_path, monkey
     fresh = Store(home=tmp_path)
     assert fresh.get_config("tags", []) == []
     assert fresh.tags_for("txn1") == []
+
+
+def test_tag_command_sets_tags_on_one_transaction(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business", "Spouse"])
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UBER RIDE")
+    store.upsert_transactions([t])
+    result = runner.invoke(app, ["tag", t.id, "Business", "Spouse"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert sorted(fresh.tags_for(t.id)) == ["Business", "Spouse"]
+
+
+def test_tag_command_rejects_tag_not_in_curated_list(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    t = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UBER RIDE")
+    store.upsert_transactions([t])
+    result = runner.invoke(app, ["tag", t.id, "NotARealTag"])
+    assert result.exit_code != 0
+
+
+def test_tag_command_with_pattern_bulk_applies(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    t1 = Transaction(date="2026-06-01", amount=200, direction=Direction.DEBIT,
+                     description_raw="UBER 1")
+    t1.merchant_norm = "UBER INDIA SYSTEMS"
+    t2 = Transaction(date="2026-06-02", amount=250, direction=Direction.DEBIT,
+                     description_raw="UBER 2")
+    t2.merchant_norm = "UBER INDIA SYSTEMS"
+    store.upsert_transactions([t1, t2])
+    result = runner.invoke(app, ["tag", "--pattern", "UBER INDIA SYSTEMS", "Business"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert fresh.tags_for(t1.id) == ["Business"]
+    assert fresh.tags_for(t2.id) == ["Business"]
