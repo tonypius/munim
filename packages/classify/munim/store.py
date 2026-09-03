@@ -315,3 +315,21 @@ class Store:
         rows = self.db.execute(
             "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag").fetchall()
         return {r["tag"]: r["n"] for r in rows}
+
+    def apply_tag_to_pattern(self, pattern: str, tag: str,
+                             kind: str = "merchant") -> int:
+        """One-time bulk apply: add `tag` to every transaction currently
+        matching pattern, confirmed or not. Does NOT write to the memory
+        table — this never auto-applies to future imports, and never
+        removes a transaction's other tags. The web/CLI escape hatch for
+        'I know this whole batch was business' without violating the
+        manual-only guarantee."""
+        col = "payee_handle" if kind == "payee" else "merchant_norm"
+        ids = [r["id"] for r in self.db.execute(
+            f"SELECT id FROM transactions WHERE {col}=?", (pattern,)).fetchall()]
+        for txn_id in ids:
+            self.db.execute(
+                "INSERT OR IGNORE INTO tags(txn_id, tag) VALUES(?,?)",
+                (txn_id, tag))
+        self.db.commit()
+        return len(ids)
