@@ -34,11 +34,27 @@ def test_fresh_store_has_subcategory_columns(tmp_path):
     assert "subcategory" in _column_names(store.db, "memory")
 
 
+def test_upsert_and_get_transaction_roundtrips_subcategory(tmp_path):
+    """A non-default subcategory written through the app's normal insert
+    path (upsert_transactions) must come back intact via get_transaction,
+    which exercises _row_to_txn. This is the path real imports use, as
+    opposed to just asserting the column exists."""
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                     description_raw="SHETTY BEER SHOP",
+                     category="Groceries", subcategory="Alcohol")
+
+    store.upsert_transactions([t])
+    reloaded = store.get_transaction(t.id)
+
+    assert reloaded is not None
+    assert reloaded.subcategory == "Alcohol"
+
+
 def test_migrate_adds_subcategory_to_pre_existing_database(tmp_path):
     """Simulate a database created before this column existed: build the
     old schema by hand, then open it with Store and confirm the column
     gets added without losing existing rows."""
-    (tmp_path).mkdir(exist_ok=True)
     db_path = tmp_path / "munim.db"
     old_schema = """
     CREATE TABLE transactions (
