@@ -72,7 +72,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- POST ----------------------------------------------------------
     def do_POST(self):
-        if urlparse(self.path).path != "/api/confirm":
+        path = urlparse(self.path).path
+        if path == "/api/rule/subcategory":
+            self._handle_rule_subcategory()
+            return
+        if path != "/api/confirm":
             self._send({"error": "not found"}, status=404)
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -149,6 +153,27 @@ class Handler(BaseHTTPRequestHandler):
         t.status = Status.CONFIRMED
         self.store.update_transaction(t)
         return propagated
+
+    def _handle_rule_subcategory(self):
+        """Set a rule's subcategory (keeping its existing category) and
+        backfill every currently-matching transaction, confirmed or not
+        — the deliberate 'refine my history' action from the Rules page,
+        never triggered automatically from review/confirm."""
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        pattern = (data.get("pattern") or "").upper().strip()
+        kind = data.get("kind") or "merchant"
+        subcategory = data.get("subcategory") or ""
+        row = self.store.db.execute(
+            "SELECT category FROM memory WHERE pattern=? AND kind=?",
+            (pattern, kind)).fetchone()
+        if row is None:
+            self._send({"error": "unknown rule"}, status=404)
+            return
+        self.store.remember(pattern, row["category"], kind=kind,
+                            subcategory=subcategory)
+        n = self.store.apply_subcategory(pattern, subcategory, kind)
+        self._send({"ok": True, "updated": n})
 
     # ---- data assembly --------------------------------------------------
     def _overview(self):
@@ -240,11 +265,12 @@ class Handler(BaseHTTPRequestHandler):
         return {"categories": cats,
                 "paths": {c: resolve(tree, c) for c in cats},
                 "usage": {c: usage.get(c, {"n": 0, "total": 0.0})
-                          for c in set(cats) | set(usage)}}
+                          for c in set(cats) | set(usage)},
+                "subcategories": self.store.get_config("subcategories", {}) or {}}
 
     def _rules(self):
         learned = self.store.db.execute(
-            "SELECT pattern, kind, category, created_at FROM memory "
+            "SELECT pattern, kind, category, subcategory, created_at FROM memory "
             "ORDER BY created_at DESC").fetchall()
         from ..memory import MemoryMatcher
         dictionary = MemoryMatcher(

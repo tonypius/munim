@@ -1,8 +1,12 @@
 """Category subcategories: a second, optional level under a category
 head (Groceries -> Groceries:Alcohol), taught via memory rules and
 applied independently of the existing flat category field."""
+import json
 import sqlite3
 import sys
+import threading
+import urllib.request
+from http.server import HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -353,3 +357,66 @@ def test_subcategories_list_shows_usage_counts(tmp_path, monkeypatch):
     result = runner.invoke(app, ["categories", "subcategories", "list"])
     assert result.exit_code == 0
     assert "Alcohol" in result.output
+
+
+from munim.web.server import Handler
+
+
+def _server(store):
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def test_api_categories_includes_subcategories_config(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/categories", timeout=3).read())
+        assert d["subcategories"] == {"Groceries": ["Alcohol"]}
+    finally:
+        srv.shutdown()
+
+
+def test_api_rules_includes_subcategory_field(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.remember("SHETTY BEER SHOP", "Groceries", subcategory="Alcohol")
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/rules", timeout=3).read())
+        row = next(r for r in d["learned"] if r["pattern"] == "SHETTY BEER SHOP")
+        assert row["subcategory"] == "Alcohol"
+    finally:
+        srv.shutdown()
+
+
+def test_post_rule_subcategory_updates_rule_and_backfills(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol"]})
+    store.remember("SHETTY BEER SHOP", "Groceries")
+    t = Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    status="confirmed", merchant_norm="SHETTY BEER SHOP")
+    store.upsert_transactions([t])
+    srv, port = _server(store)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/rule/subcategory", method="POST",
+            data=json.dumps({"pattern": "SHETTY BEER SHOP", "kind": "merchant",
+                             "subcategory": "Alcohol"}).encode(),
+            headers={"Content-Type": "application/json"})
+        res = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        assert res["ok"] is True
+        assert res["updated"] == 1
+        reloaded = store.get_transaction(t.id)
+        assert reloaded.subcategory == "Alcohol"
+        assert reloaded.category == "Groceries"
+    finally:
+        srv.shutdown()
