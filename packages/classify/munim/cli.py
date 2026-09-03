@@ -30,6 +30,11 @@ DEFAULT_CATEGORIES = [
     "Family & Friends", "Other",
 ]
 
+MAX_TAGS = 30   # a generous cap — tags don't fight the same top-level
+                # "labeling consistency" pressure a mutually-exclusive
+                # category list has, so this is about avoiding a
+                # genuinely unmanageable list, not review-menu sanity.
+
 
 def _store() -> Store:
     return Store()
@@ -882,6 +887,59 @@ def relabel(pattern: str, category: str):
     store.db.commit()
     console.print(f"[green]{pattern} → {category}[/green]: {n} transactions "
                   f"updated, memory rule replaced.")
+
+
+# -------------------------------------------------------------------- tags
+tag_app = typer.Typer(help="Manage the curated tag list.", no_args_is_help=True)
+app.add_typer(tag_app, name="tags")
+
+
+@tag_app.command("add")
+def tags_add(name: str, force: bool = typer.Option(False, "--force")):
+    """Add a tag to the curated list, e.g.: munim tags add Business"""
+    store = _store()
+    tags = store.get_config("tags", [])
+    if name in tags:
+        console.print(f"[yellow]{name} already exists.[/yellow]")
+        raise typer.Exit(1)
+    if len(tags) >= MAX_TAGS and not force:
+        console.print(f"[red]You already have {len(tags)} tags — the "
+                      f"limit is {MAX_TAGS}.[/red] --force if you accept "
+                      "the tradeoff.")
+        raise typer.Exit(1)
+    tags.append(name)
+    store.set_config("tags", tags)
+    console.print(f"[green]Added tag: {name}.[/green]")
+
+
+@tag_app.command("list")
+def tags_list():
+    """Show your curated tags and how much each has been used."""
+    store = _store()
+    tags = store.get_config("tags", [])
+    counts = store.tag_counts()
+    table = Table(title="Tags")
+    table.add_column("Name")
+    table.add_column("Transactions", justify="right")
+    for name in tags:
+        table.add_row(name, str(counts.get(name, 0)))
+    console.print(table)
+
+
+@tag_app.command("remove")
+def tags_remove(name: str):
+    """Remove a tag from the taxonomy and every transaction carrying it."""
+    store = _store()
+    tags = store.get_config("tags", [])
+    if name not in tags:
+        console.print(f"[red]{name} is not a tag (munim tags list).[/red]")
+        raise typer.Exit(1)
+    tags.remove(name)
+    store.set_config("tags", tags)
+    n = store.db.execute("DELETE FROM tags WHERE tag=?", (name,)).rowcount
+    store.db.commit()
+    console.print(f"[green]Removed tag {name}[/green] — "
+                  f"cleared from {n} transactions.")
 
 
 # --------------------------------------------------------------------- eval

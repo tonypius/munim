@@ -90,3 +90,57 @@ def test_apply_tag_to_pattern_matches_payee_handle_for_payee_kind(tmp_path):
     n = store.apply_tag_to_pattern("RAMESH KUMAR", "Spouse", "payee")
     assert n == 1
     assert store.tags_for(t.id) == ["Spouse"]
+
+
+from typer.testing import CliRunner
+from munim.cli import app
+
+runner = CliRunner()
+
+
+def test_tags_add_creates_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    result = runner.invoke(app, ["tags", "add", "Business"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert fresh.get_config("tags", []) == ["Business"]
+
+
+def test_tags_add_rejects_duplicate(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    result = runner.invoke(app, ["tags", "add", "Business"])
+    assert result.exit_code != 0
+
+
+def test_tags_add_enforces_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", [f"Tag{i}" for i in range(30)])
+    result = runner.invoke(app, ["tags", "add", "OneTooMany"])
+    assert result.exit_code != 0
+    result_forced = runner.invoke(app, ["tags", "add", "OneTooMany", "--force"])
+    assert result_forced.exit_code == 0, result_forced.output
+
+
+def test_tags_list_shows_usage_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    store.set_tags("txn1", ["Business"])
+    result = runner.invoke(app, ["tags", "list"])
+    assert result.exit_code == 0
+    assert "Business" in result.output
+
+
+def test_tags_remove_deletes_from_taxonomy_and_all_transactions(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("tags", ["Business"])
+    store.set_tags("txn1", ["Business"])
+    result = runner.invoke(app, ["tags", "remove", "Business"])
+    assert result.exit_code == 0, result.output
+    fresh = Store(home=tmp_path)
+    assert fresh.get_config("tags", []) == []
+    assert fresh.tags_for("txn1") == []
