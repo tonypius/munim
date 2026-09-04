@@ -743,7 +743,8 @@ def plan_migration(store) -> dict:
     health_care_count = sum(
         1 for t in txns
         if t.category == HEALTH_CARE_DEFAULT_CATEGORY
-        and (t.merchant_norm or t.payee_handle) not in HEALTH_INSURANCE
+        and t.merchant_norm not in HEALTH_INSURANCE
+        and t.payee_handle not in HEALTH_INSURANCE
     )
 
     melvin_pending = sum(1 for tid in MELVIN_LOAN_FIX if tid in by_id)
