@@ -192,3 +192,111 @@ def test_plan_migration_never_writes(tmp_path):
     plan_migration(store)
     reloaded = Store(home=tmp_path).get_transaction(t.id)
     assert reloaded.subcategory == ""
+
+
+def test_backup_database_creates_a_copy(tmp_path):
+    from subcategorize_v1 import backup_database
+    store = Store(home=tmp_path)
+    backup_path = backup_database(tmp_path)
+    assert backup_path.exists()
+    assert backup_path != (tmp_path / "munim.db")
+    assert backup_path.read_bytes() == (tmp_path / "munim.db").read_bytes()
+
+
+def test_apply_migration_sets_subcategory_when_category_matches(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Dining",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.subcategory == "Delivery"
+    assert reloaded.category == "Dining"  # unchanged
+
+
+def test_apply_migration_skips_pattern_match_in_wrong_category(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Shopping",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.subcategory == ""  # NOT touched -- wrong category
+    assert reloaded.category == "Shopping"
+
+
+def test_apply_migration_updates_existing_memory_row_but_never_creates_one(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    store.remember("ZOMATO NEW", "Dining", kind="merchant")
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Dining",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    row = store.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern='ZOMATO NEW'").fetchone()
+    assert row["subcategory"] == "Delivery"
+
+    # A pattern with NO existing memory row must not gain one.
+    t2 = Transaction(date="2026-06-02", amount=100, direction=Direction.DEBIT,
+                     description_raw="REDBUS", category="Transport",
+                     merchant_norm="REDBUS")
+    store.upsert_transactions([t2])
+    apply_migration(store)
+    row2 = store.db.execute(
+        "SELECT COUNT(*) AS n FROM memory WHERE pattern='REDBUS'").fetchone()
+    assert row2["n"] == 0
+
+
+def test_apply_migration_health_care_default_after_insurance(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    insured = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                          description_raw="POLICYBAZAAR COM GURGAON", category="Health",
+                          merchant_norm="POLICYBAZAAR COM GURGAON")
+    other_health = Transaction(date="2026-06-02", amount=300, direction=Direction.DEBIT,
+                               description_raw="SOME DENTIST", category="Health",
+                               merchant_norm="SOME DENTIST")
+    store.upsert_transactions([insured, other_health])
+    apply_migration(store)
+    reloaded_insured = Store(home=tmp_path).get_transaction(insured.id)
+    reloaded_other = Store(home=tmp_path).get_transaction(other_health.id)
+    assert reloaded_insured.subcategory == "Insurance"
+    assert reloaded_other.subcategory == "Care"
+
+
+def test_apply_migration_melvin_fix_changes_category_and_subcategory(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    loan_txn = Transaction(id="addd98a49577e4a7", date="2024-07-11", amount=20000,
+                           direction=Direction.DEBIT, description_raw="loanrepayment",
+                           category="Dining", merchant_norm="MELVIN MANOJ MATHEW MELVINMANOJ92")
+    food_txn = Transaction(date="2023-04-04", amount=800, direction=Direction.DEBIT,
+                           description_raw="FOOD", category="Dining",
+                           merchant_norm="MELVIN MANOJ MATHEW MELVINMANOJ92")
+    store.upsert_transactions([loan_txn, food_txn])
+    apply_migration(store)
+    reloaded_loan = Store(home=tmp_path).get_transaction(loan_txn.id)
+    reloaded_food = Store(home=tmp_path).get_transaction(food_txn.id)
+    assert reloaded_loan.category == "Family & Friends"
+    assert reloaded_loan.subcategory == "Loans"
+    # The OTHER transaction under the same merchant must be untouched --
+    # this is the whole reason the fix is by transaction id, not pattern.
+    assert reloaded_food.category == "Dining"
+    assert reloaded_food.subcategory == ""
+
+
+def test_apply_migration_returns_same_shape_as_plan_migration(tmp_path):
+    from subcategorize_v1 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Dining",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    report = apply_migration(store)
+    assert report["pattern"]["ZOMATO NEW"]["count"] == 1

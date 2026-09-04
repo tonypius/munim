@@ -9,6 +9,10 @@ transaction ids, not a merchant pattern — see apply_migration in a
 later task).
 """
 
+import shutil
+from datetime import datetime
+from pathlib import Path
+
 # ------------------------------------------------------- Groceries: Meat
 GROCERIES_MEAT = [
     "FRESHTOHOME FOODS PRIVA",
@@ -418,3 +422,53 @@ def plan_migration(store) -> dict:
         "health_care_default": {"count": health_care_count},
         "melvin_fix": {"count": melvin_pending},
     }
+
+
+def backup_database(home: Path) -> Path:
+    """Copy munim.db to a timestamped backup file before any write.
+    Raises FileNotFoundError if the source database doesn't exist yet."""
+    src = home / "munim.db"
+    if not src.exists():
+        raise FileNotFoundError(f"No database at {src}")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = home / f"munim.db.bak.{stamp}"
+    shutil.copy2(src, dst)
+    return dst
+
+
+def apply_migration(store) -> dict:
+    """Write every subcategory assignment: pattern-based moves (scoped to
+    their expected category), the Health Care default, then the Melvin
+    fix by transaction id. Returns the same report shape as
+    plan_migration() so the caller can print a before/after comparison."""
+    report = plan_migration(store)
+
+    for p, (expected_category, subcategory) in SUBCATEGORY_MOVES.items():
+        store.db.execute(
+            "UPDATE transactions SET subcategory=? "
+            "WHERE (merchant_norm=? OR payee_handle=?) AND category=?",
+            (subcategory, p, p, expected_category))
+        store.db.execute(
+            "UPDATE memory SET subcategory=? WHERE pattern=?",
+            (subcategory, p))
+
+    insurance_patterns = set(HEALTH_INSURANCE)
+    all_txns = store.all_transactions()
+    for t in all_txns:
+        if t.category != HEALTH_CARE_DEFAULT_CATEGORY:
+            continue
+        if t.merchant_norm in insurance_patterns or t.payee_handle in insurance_patterns:
+            continue
+        if t.subcategory:
+            continue  # a pattern rule already set something -- don't override
+        store.db.execute(
+            "UPDATE transactions SET subcategory=? WHERE id=?",
+            (HEALTH_CARE_DEFAULT_SUBCATEGORY, t.id))
+
+    for txn_id, (new_category, new_subcategory) in MELVIN_LOAN_FIX.items():
+        store.db.execute(
+            "UPDATE transactions SET category=?, subcategory=? WHERE id=?",
+            (new_category, new_subcategory, txn_id))
+
+    store.db.commit()
+    return report
