@@ -147,7 +147,7 @@ implementation plan (too long to inline here); summary:
 | Housing:Repairs | 13 | ₹9,598.00 | Named plumbers/electricians, hardware stores, UrbanClap |
 | Housing:Household Help | 9 | ₹46,000.00 | Cook-salary UPI narrations (already identified as miscategorized in Context) |
 | Housing (unsubcategorized) | 2 | ₹72,872.77 | "Rural Development And" (₹72,872.77, likely a property-registration cess — **low confidence, flagged below**) and a ₹0 reversal narrated "House Miscellaneous" |
-| Stays Utilities | 32 | ₹85,791.53 | BESCOM, KSEB, GAIL, Airtel, Jio, Vodafone, BSNL, recharge/wallet/broadband — genuine metered-utility and telecom bills |
+| Stays Utilities | 32 | ₹88,532.47 | BESCOM, KSEB, GAIL, Airtel, Jio, Vodafone, BSNL, recharge/wallet/broadband — genuine metered-utility and telecom bills |
 | Other (ambiguous) | 19 | ₹47,080.00 | Small (₹15–₹14,000) one-off or low-signal individual-name UPI payments with no purpose keyword — see below |
 | Transport (unsubcategorized) | 1 | ₹512.08 | "Bangalore Traffic Poli[ce]" — a traffic fine, not a utility |
 
