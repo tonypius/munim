@@ -107,3 +107,72 @@ def test_melvin_loan_fix_has_exactly_two_transactions():
         "addd98a49577e4a7": ("Family & Friends", "Loans"),
         "67ee8f18e8565db8": ("Family & Friends", "Loans"),
     }
+
+
+from munim.store import Store
+from munim.schema import Transaction, Direction
+
+
+def test_plan_migration_counts_pattern_match_in_expected_category(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Dining",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    entry = report["pattern"]["ZOMATO NEW"]
+    assert entry["count"] == 1
+    assert entry["already_matches_category"] is True
+    assert entry["destination"] == ("Dining", "Delivery")
+
+
+def test_plan_migration_flags_pattern_in_wrong_category(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Shopping",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    entry = report["pattern"]["ZOMATO NEW"]
+    assert entry["count"] == 1
+    assert entry["already_matches_category"] is False
+
+
+def test_plan_migration_counts_health_care_default(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    insured = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                          description_raw="POLICYBAZAAR COM GURGAON", category="Health",
+                          merchant_norm="POLICYBAZAAR COM GURGAON")
+    other_health = Transaction(date="2026-06-02", amount=300, direction=Direction.DEBIT,
+                               description_raw="SOME DENTIST", category="Health",
+                               merchant_norm="SOME DENTIST")
+    store.upsert_transactions([insured, other_health])
+    report = plan_migration(store)
+    # Only the non-insurance Health transaction counts toward the default
+    assert report["health_care_default"]["count"] == 1
+
+
+def test_plan_migration_counts_melvin_fix_pending(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    t1 = Transaction(id="addd98a49577e4a7", date="2024-07-11", amount=20000,
+                     direction=Direction.DEBIT, description_raw="loanrepayment",
+                     category="Dining", merchant_norm="MELVIN MANOJ MATHEW MELVINMANOJ92")
+    store.upsert_transactions([t1])
+    report = plan_migration(store)
+    assert report["melvin_fix"]["count"] == 1  # only 1 of the 2 ids present
+
+
+def test_plan_migration_never_writes(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="ZOMATO NEW", category="Dining",
+                    merchant_norm="ZOMATO NEW")
+    store.upsert_transactions([t])
+    plan_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.subcategory == ""

@@ -383,3 +383,37 @@ def _build_subcategory_moves() -> dict[str, tuple[str, str]]:
 
 
 SUBCATEGORY_MOVES = _build_subcategory_moves()
+
+
+def plan_migration(store) -> dict:
+    """Read-only: compute what apply_migration() would change, without
+    writing anything."""
+    txns = store.all_transactions()
+    by_id = {t.id: t for t in txns}
+
+    pattern: dict[str, dict] = {}
+    for p, destination in SUBCATEGORY_MOVES.items():
+        expected_category, _ = destination
+        matches = [t for t in txns
+                  if t.merchant_norm == p or t.payee_handle == p]
+        already_matches = all(t.category == expected_category for t in matches) \
+            if matches else True
+        pattern[p] = {
+            "count": len(matches),
+            "already_matches_category": already_matches,
+            "destination": destination,
+        }
+
+    health_care_count = sum(
+        1 for t in txns
+        if t.category == HEALTH_CARE_DEFAULT_CATEGORY
+        and (t.merchant_norm or t.payee_handle) not in HEALTH_INSURANCE
+    )
+
+    melvin_pending = sum(1 for tid in MELVIN_LOAN_FIX if tid in by_id)
+
+    return {
+        "pattern": pattern,
+        "health_care_default": {"count": health_care_count},
+        "melvin_fix": {"count": melvin_pending},
+    }
