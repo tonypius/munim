@@ -198,6 +198,31 @@ def test_propagate_clears_is_transfer_for_non_transfer_category(tmp_path):
     assert reloaded.is_transfer is False
 
 
+def test_memory_match_to_transfers_sets_is_transfer(tmp_path):
+    """A transaction resolved via a MEMORY_EXACT rule to category=
+    "Transfers" (e.g. a recurring credit-card autopay, taught once via
+    review, now auto-resolving on every subsequent import with no
+    structural re-detection) must get is_transfer=True too — not just
+    category. Pipeline._assign() is the single function every
+    non-structural stage (memory, dictionary, purpose, fallback) routes
+    through, and it previously set only category/subcategory/stage/
+    confidence/status, never is_transfer — silently leaving every
+    memory-resolved transfer counted as real spend/income in the
+    dashboard and Categories page, which check is_transfer, not the
+    category string. This is the same invariant test_propagate_sets_
+    is_transfer_for_transfers_category already enforces for propagate();
+    this test covers the pipeline's own classification path instead."""
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.remember("SOME AUTOPAY MERCHANT XYZ", "Transfers", kind="merchant")
+    t = Transaction(date="2026-06-05", amount=5000, direction=Direction.DEBIT,
+                    description_raw="SOME AUTOPAY MERCHANT XYZ")
+    Pipeline(store).run([t])
+    assert t.category == "Transfers"
+    assert t.stage == Stage.MEMORY_EXACT
+    assert t.is_transfer is True
+
+
 def test_predictions_never_enter_memory_without_confirmation(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("region", "in")

@@ -173,6 +173,12 @@ class Pipeline:
         t.subcategory = subcategory
         t.stage = stage
         t.confidence = round(conf, 3)
+        # is_transfer must track category here too, not just the
+        # structural detector's own pass — every non-structural stage
+        # (memory, dictionary, purpose, fallback) routes through this
+        # function, and reports/dashboard check is_transfer, not the
+        # category string.
+        t.is_transfer = t.category == "Transfers"
         # A user-memory exact hit is as good as confirmed — the user taught it.
         t.status = (Status.CONFIRMED if stage == Stage.MEMORY_EXACT
                     else Status.PROVISIONAL)
