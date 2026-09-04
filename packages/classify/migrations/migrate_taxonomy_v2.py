@@ -307,3 +307,48 @@ def apply_migration(store) -> dict:
 
     store.db.commit()
     return report
+
+
+def _print_report(report: dict, heading: str) -> None:
+    print(f"\n=== {heading} ===")
+    print("\n--- Whole-category moves ---")
+    for old_cat, info in report["whole_category"].items():
+        new_cat, new_sub = WHOLE_CATEGORY_MOVES[old_cat]
+        dest = f"{new_cat}:{new_sub}" if new_sub else new_cat
+        print(f"  {old_cat!r:20s} -> {dest:35s} "
+              f"n={info['count']:4d}  total={info['total']:12,.2f}")
+    print("\n--- Pattern moves (Utilities split + CRED fix) ---")
+    total_n = sum(i["count"] for i in report["pattern"].values())
+    total_amt = sum(i["total"] for i in report["pattern"].values())
+    print(f"  {len(report['pattern'])} patterns, "
+          f"{total_n} transactions matched, ₹{total_amt:,.2f} total")
+    zero = [p for p, i in report["pattern"].items() if i["count"] == 0]
+    if zero:
+        print(f"  ({len(zero)} patterns matched 0 transactions — "
+              f"expected if the live data has changed since the spec "
+              f"was written)")
+
+
+if __name__ == "__main__":
+    import argparse
+    from munim.store import Store as _Store
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true",
+                        help="Write changes. Without this flag, dry-run only.")
+    args = parser.parse_args()
+
+    store = _Store()
+    print(f"Database: {store.home / 'munim.db'}")
+
+    if not args.apply:
+        report = plan_migration(store)
+        _print_report(report, "DRY RUN — no changes written")
+        print("\nRe-run with --apply to write these changes "
+              "(a backup is taken automatically first).")
+    else:
+        backup_path = backup_database(store.home)
+        print(f"Backup written to: {backup_path}")
+        report = apply_migration(store)
+        _print_report(report, "APPLIED — changes written")
+        print("\nDone. Verify with: munim categories list")
