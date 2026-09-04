@@ -155,6 +155,22 @@ def test_plan_migration_counts_health_care_default(tmp_path):
     assert report["health_care_default"]["count"] == 1
 
 
+def test_plan_migration_health_care_default_excludes_insurance_pattern_in_either_field(tmp_path):
+    from subcategorize_v1 import plan_migration
+    store = Store(home=tmp_path)
+    # merchant_norm does NOT match a HEALTH_INSURANCE pattern, but
+    # payee_handle does. The buggy `(merchant_norm or payee_handle)`
+    # short-circuits on the truthy merchant_norm and never checks
+    # payee_handle, wrongly counting this toward the Care default.
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="SOME UNRELATED THING", category="Health",
+                    merchant_norm="SOME UNRELATED THING",
+                    payee_handle="POLICYBAZAAR COM GURGAON")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    assert report["health_care_default"]["count"] == 0
+
+
 def test_plan_migration_counts_melvin_fix_pending(tmp_path):
     from subcategorize_v1 import plan_migration
     store = Store(home=tmp_path)
