@@ -132,7 +132,22 @@ def test_plan_migration_counts_whole_category_move(tmp_path):
                      merchant_norm="FUEL STOP 2")
     store.upsert_transactions([t1, t2])
     report = plan_migration(store)
-    assert report["whole_category"]["Fuel"] == {"count": 2, "total": 800.0}
+    assert report["whole_category"]["Fuel"] == {
+        "count": 2, "debit_count": 2, "total": 800.0, "memory_count": 0}
+
+
+def test_plan_migration_reports_memory_count_and_debit_count(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="FUEL STOP", category="Fuel",
+                    merchant_norm="FUEL STOP")
+    store.upsert_transactions([t])
+    store.remember("FUEL STOP", "Fuel", kind="merchant")
+    report = plan_migration(store)
+    entry = report["whole_category"]["Fuel"]
+    assert entry["memory_count"] == 1
+    assert entry["debit_count"] == entry["count"] == 1
 
 
 def test_plan_migration_counts_pattern_move(tmp_path):

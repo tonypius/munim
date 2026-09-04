@@ -1,10 +1,10 @@
 """One-off migration: category taxonomy v2 (17 categories, down from 20).
 
 See docs/superpowers/specs/2026-09-04-category-taxonomy-v2-design.md for
-the full rationale and per-rule verification notes. This module is data +
-pure functions only — no I/O, no Store writes. See migrate() at the
-bottom of this file (added in Task 3) for the apply/dry-run entry points,
-and __main__ (Task 4) for the CLI wrapper.
+the full rationale and per-rule verification notes. plan_migration() is
+read-only. apply_migration() and backup_database() write to the database
+and the filesystem respectively — see __main__ below for the CLI, which
+defaults to a dry run and requires --apply to write anything.
 """
 import shutil
 from datetime import datetime
@@ -241,16 +241,25 @@ PATTERN_MOVES = build_pattern_moves()
 def plan_migration(store) -> dict:
     """Read-only: compute what apply_migration() would change, without
     writing anything. Matches transactions the same way the rest of the
-    app does — merchant_norm falling back to payee_handle, exact equality
-    against the pattern string."""
+    app does — independent equality against merchant_norm OR
+    payee_handle (not a fallback), exact equality against the pattern
+    string."""
     txns = store.all_transactions()
     whole_category: dict[str, dict] = {}
     pattern: dict[str, dict] = {}
 
     for old_cat, destination in WHOLE_CATEGORY_MOVES.items():
         matches = [t for t in txns if t.category == old_cat]
-        total = sum(t.amount for t in matches if t.direction.value == "debit")
-        whole_category[old_cat] = {"count": len(matches), "total": total}
+        debit_matches = [t for t in matches if t.direction.value == "debit"]
+        mem_count = store.db.execute(
+            "SELECT COUNT(*) FROM memory WHERE category=?", (old_cat,)
+        ).fetchone()[0]
+        whole_category[old_cat] = {
+            "count": len(matches),
+            "debit_count": len(debit_matches),
+            "total": sum(t.amount for t in debit_matches),
+            "memory_count": mem_count,
+        }
 
     for p, destination in PATTERN_MOVES.items():
         # Independent OR, not a merchant_norm-falls-back-to-payee_handle
@@ -259,9 +268,17 @@ def plan_migration(store) -> dict:
         # prediction of what --apply will actually do.
         matches = [t for t in txns
                   if t.merchant_norm == p or t.payee_handle == p]
-        total = sum(t.amount for t in matches if t.direction.value == "debit")
-        pattern[p] = {"count": len(matches), "total": total,
-                      "destination": destination}
+        debit_matches = [t for t in matches if t.direction.value == "debit"]
+        mem_count = store.db.execute(
+            "SELECT COUNT(*) FROM memory WHERE pattern=?", (p,)
+        ).fetchone()[0]
+        pattern[p] = {
+            "count": len(matches),
+            "debit_count": len(debit_matches),
+            "total": sum(t.amount for t in debit_matches),
+            "memory_count": mem_count,
+            "destination": destination,
+        }
 
     return {"whole_category": whole_category, "pattern": pattern}
 
@@ -316,17 +333,29 @@ def _print_report(report: dict, heading: str) -> None:
         new_cat, new_sub = WHOLE_CATEGORY_MOVES[old_cat]
         dest = f"{new_cat}:{new_sub}" if new_sub else new_cat
         print(f"  {old_cat!r:20s} -> {dest:35s} "
-              f"n={info['count']:4d}  total={info['total']:12,.2f}")
-    print("\n--- Pattern moves (Utilities split + CRED fix) ---")
-    total_n = sum(i["count"] for i in report["pattern"].values())
-    total_amt = sum(i["total"] for i in report["pattern"].values())
-    print(f"  {len(report['pattern'])} patterns, "
-          f"{total_n} transactions matched, ₹{total_amt:,.2f} total")
+              f"n={info['count']:4d} ({info['debit_count']} debit)  "
+              f"debit_total={info['total']:12,.2f}  "
+              f"memory_rows={info['memory_count']}")
+    print("\n--- Pattern moves (Utilities split + CRED fix), by destination ---")
+    by_dest: dict[tuple, dict] = {}
+    for p, info in report["pattern"].items():
+        agg = by_dest.setdefault(info["destination"], {
+            "count": 0, "debit_count": 0, "total": 0.0, "memory_count": 0})
+        agg["count"] += info["count"]
+        agg["debit_count"] += info["debit_count"]
+        agg["total"] += info["total"]
+        agg["memory_count"] += info["memory_count"]
+    for (new_cat, new_sub), agg in sorted(by_dest.items()):
+        dest = f"{new_cat}:{new_sub}" if new_sub else new_cat
+        print(f"  -> {dest:35s} n={agg['count']:4d} ({agg['debit_count']} debit)  "
+              f"debit_total={agg['total']:12,.2f}  "
+              f"memory_rows={agg['memory_count']}")
     zero = [p for p, i in report["pattern"].items() if i["count"] == 0]
     if zero:
-        print(f"  ({len(zero)} patterns matched 0 transactions — "
-              f"expected if the live data has changed since the spec "
-              f"was written)")
+        print(f"\n  ({len(zero)} of {len(report['pattern'])} individual patterns "
+              f"matched 0 transactions — expected if the live data has "
+              f"changed since the spec was written; the per-destination "
+              f"totals above are what matters)")
 
 
 if __name__ == "__main__":
