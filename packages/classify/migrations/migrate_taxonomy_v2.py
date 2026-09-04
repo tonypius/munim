@@ -232,3 +232,32 @@ def build_pattern_moves() -> dict[str, tuple[str, str]]:
 
 
 PATTERN_MOVES = build_pattern_moves()
+
+
+# ------------------------------------------------------------- dry run
+def plan_migration(store) -> dict:
+    """Read-only: compute what apply_migration() would change, without
+    writing anything. Matches transactions the same way the rest of the
+    app does — merchant_norm falling back to payee_handle, exact equality
+    against the pattern string."""
+    txns = store.all_transactions()
+    whole_category: dict[str, dict] = {}
+    pattern: dict[str, dict] = {}
+
+    for old_cat, destination in WHOLE_CATEGORY_MOVES.items():
+        matches = [t for t in txns if t.category == old_cat]
+        total = sum(t.amount for t in matches if t.direction.value == "debit")
+        whole_category[old_cat] = {"count": len(matches), "total": total}
+
+    for p, destination in PATTERN_MOVES.items():
+        # Independent OR, not a merchant_norm-falls-back-to-payee_handle
+        # check — must match apply_migration's SQL (merchant_norm=? OR
+        # payee_handle=?) exactly, so the dry-run's counts are a reliable
+        # prediction of what --apply will actually do.
+        matches = [t for t in txns
+                  if t.merchant_norm == p or t.payee_handle == p]
+        total = sum(t.amount for t in matches if t.direction.value == "debit")
+        pattern[p] = {"count": len(matches), "total": total,
+                      "destination": destination}
+
+    return {"whole_category": whole_category, "pattern": pattern}

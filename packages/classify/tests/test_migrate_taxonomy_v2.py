@@ -115,3 +115,70 @@ def test_traffic_fine_maps_to_transport_unsubcategorized():
 def test_ambiguous_individual_names_map_to_other():
     assert PATTERN_MOVES["K SHAMALA BABUG4571"] == ("Other", "")
     assert PATTERN_MOVES["DOMINIC J JDOMINIC9980854213"] == ("Other", "")
+
+
+from munim.store import Store
+from munim.schema import Transaction, Direction
+
+
+def test_plan_migration_counts_whole_category_move(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t1 = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                     description_raw="FUEL STOP", category="Fuel",
+                     merchant_norm="FUEL STOP")
+    t2 = Transaction(date="2026-06-02", amount=300, direction=Direction.DEBIT,
+                     description_raw="FUEL STOP 2", category="Fuel",
+                     merchant_norm="FUEL STOP 2")
+    store.upsert_transactions([t1, t2])
+    report = plan_migration(store)
+    assert report["whole_category"]["Fuel"] == {"count": 2, "total": 800.0}
+
+
+def test_plan_migration_counts_pattern_move(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=1000, direction=Direction.DEBIT,
+                    description_raw="AXIS CRED CLUB", category="Subscriptions",
+                    merchant_norm="AXIS CRED CLUB")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    entry = report["pattern"]["AXIS CRED CLUB"]
+    assert entry["count"] == 1
+    assert entry["total"] == 1000.0
+    assert entry["destination"] == ("Transfers", "Credit Card Payment")
+
+
+def test_plan_migration_matches_payee_handle_when_merchant_norm_empty(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=2000, direction=Direction.DEBIT,
+                    description_raw="MYGATE PAYMENT", category="Utilities",
+                    merchant_norm="", payee_handle="MYGATE")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    assert report["pattern"]["MYGATE"]["count"] == 1
+
+
+def test_plan_migration_ignores_unrelated_transactions(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="ZOMATO", category="Dining",
+                    merchant_norm="ZOMATO")
+    store.upsert_transactions([t])
+    report = plan_migration(store)
+    assert "Dining" not in report["whole_category"]
+    assert "ZOMATO" not in report["pattern"]
+
+
+def test_plan_migration_never_writes(tmp_path):
+    from migrate_taxonomy_v2 import plan_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="FUEL STOP", category="Fuel",
+                    merchant_norm="FUEL STOP")
+    store.upsert_transactions([t])
+    plan_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Fuel"   # unchanged — dry run only
