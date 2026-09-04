@@ -182,3 +182,82 @@ def test_plan_migration_never_writes(tmp_path):
     plan_migration(store)
     reloaded = Store(home=tmp_path).get_transaction(t.id)
     assert reloaded.category == "Fuel"   # unchanged — dry run only
+
+
+def test_backup_database_creates_a_copy(tmp_path):
+    from migrate_taxonomy_v2 import backup_database
+    store = Store(home=tmp_path)  # creates munim.db
+    backup_path = backup_database(tmp_path)
+    assert backup_path.exists()
+    assert backup_path != (tmp_path / "munim.db")
+    assert backup_path.read_bytes() == (tmp_path / "munim.db").read_bytes()
+
+
+def test_apply_migration_updates_config(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration, NEW_CATEGORIES
+    store = Store(home=tmp_path)
+    apply_migration(store)
+    reloaded = Store(home=tmp_path)
+    assert reloaded.get_config("categories") == NEW_CATEGORIES
+
+
+def test_apply_migration_moves_whole_category_transactions(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="FUEL STOP", category="Fuel",
+                    merchant_norm="FUEL STOP")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Transport"
+    assert reloaded.subcategory == "Fuel"
+
+
+def test_apply_migration_moves_pattern_matched_transactions(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=1000, direction=Direction.DEBIT,
+                    description_raw="AXIS CRED CLUB", category="Subscriptions",
+                    merchant_norm="AXIS CRED CLUB")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Transfers"
+    assert reloaded.subcategory == "Credit Card Payment"
+
+
+def test_apply_migration_updates_matching_memory_rows(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    store.remember("MYGATE", "Utilities", kind="merchant")
+    apply_migration(store)
+    rules = store.memory_rules("merchant")
+    assert rules["MYGATE"] == "Housing"
+    row = store.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern='MYGATE'").fetchone()
+    assert row["subcategory"] == "Maintenance/Dues"
+
+
+def test_apply_migration_leaves_unrelated_transactions_untouched(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="ZOMATO", category="Dining",
+                    merchant_norm="ZOMATO", status="confirmed")
+    store.upsert_transactions([t])
+    apply_migration(store)
+    reloaded = Store(home=tmp_path).get_transaction(t.id)
+    assert reloaded.category == "Dining"
+    assert reloaded.subcategory == ""
+
+
+def test_apply_migration_returns_same_shape_as_plan_migration(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    t = Transaction(date="2026-06-01", amount=500, direction=Direction.DEBIT,
+                    description_raw="FUEL STOP", category="Fuel",
+                    merchant_norm="FUEL STOP")
+    store.upsert_transactions([t])
+    report = apply_migration(store)
+    assert report["whole_category"]["Fuel"]["count"] == 1

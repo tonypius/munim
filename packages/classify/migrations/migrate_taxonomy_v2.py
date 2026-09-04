@@ -6,6 +6,9 @@ pure functions only — no I/O, no Store writes. See migrate() at the
 bottom of this file (added in Task 3) for the apply/dry-run entry points,
 and __main__ (Task 4) for the CLI wrapper.
 """
+import shutil
+from datetime import datetime
+from pathlib import Path
 
 # ---------------------------------------------------------------- taxonomy
 NEW_CATEGORIES = [
@@ -261,3 +264,46 @@ def plan_migration(store) -> dict:
                       "destination": destination}
 
     return {"whole_category": whole_category, "pattern": pattern}
+
+
+def backup_database(home: Path) -> Path:
+    """Copy munim.db to a timestamped backup file before any write.
+    Raises FileNotFoundError if the source database doesn't exist yet."""
+    src = home / "munim.db"
+    if not src.exists():
+        raise FileNotFoundError(f"No database at {src}")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = home / f"munim.db.bak.{stamp}"
+    shutil.copy2(src, dst)
+    return dst
+
+
+def apply_migration(store) -> dict:
+    """Write the new taxonomy config, then move every matching
+    transaction and memory row. Returns the same report shape as
+    plan_migration() so the caller can print a before/after comparison."""
+    store.set_config("categories", NEW_CATEGORIES)
+    store.set_config("category_tree", NEW_CATEGORY_TREE)
+    store.set_config("subcategories", NEW_SUBCATEGORIES)
+
+    report = plan_migration(store)
+
+    for old_cat, (new_cat, new_sub) in WHOLE_CATEGORY_MOVES.items():
+        store.db.execute(
+            "UPDATE transactions SET category=?, subcategory=? WHERE category=?",
+            (new_cat, new_sub, old_cat))
+        store.db.execute(
+            "UPDATE memory SET category=?, subcategory=? WHERE category=?",
+            (new_cat, new_sub, old_cat))
+
+    for p, (new_cat, new_sub) in PATTERN_MOVES.items():
+        store.db.execute(
+            "UPDATE transactions SET category=?, subcategory=? "
+            "WHERE merchant_norm=? OR payee_handle=?",
+            (new_cat, new_sub, p, p))
+        store.db.execute(
+            "UPDATE memory SET category=?, subcategory=? WHERE pattern=?",
+            (new_cat, new_sub, p))
+
+    store.db.commit()
+    return report
