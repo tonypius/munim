@@ -966,7 +966,7 @@ def apply_migration(store) -> dict:
     for t in all_txns:
         if t.category != HEALTH_CARE_DEFAULT_CATEGORY:
             continue
-        if (t.merchant_norm or t.payee_handle) in insurance_patterns:
+        if t.merchant_norm in insurance_patterns or t.payee_handle in insurance_patterns:
             continue
         if t.subcategory:
             continue  # a pattern rule already set something -- don't override
