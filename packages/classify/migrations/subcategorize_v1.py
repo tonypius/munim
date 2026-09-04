@@ -8,9 +8,6 @@ transaction, not a pattern list) and the Melvin loan fix (two
 transaction ids, not a merchant pattern — see apply_migration in a
 later task).
 """
-import shutil
-from datetime import datetime
-from pathlib import Path
 
 # ------------------------------------------------------- Groceries: Meat
 GROCERIES_MEAT = [
