@@ -239,6 +239,18 @@ def test_apply_migration_updates_matching_memory_rows(tmp_path):
     assert row["subcategory"] == "Maintenance/Dues"
 
 
+def test_apply_migration_updates_whole_category_memory_rows(tmp_path):
+    from migrate_taxonomy_v2 import apply_migration
+    store = Store(home=tmp_path)
+    store.remember("INDIAN OIL", "Fuel", kind="merchant")
+    apply_migration(store)
+    rules = store.memory_rules("merchant")
+    assert rules["INDIAN OIL"] == "Transport"
+    row = store.db.execute(
+        "SELECT subcategory FROM memory WHERE pattern='INDIAN OIL'").fetchone()
+    assert row["subcategory"] == "Fuel"
+
+
 def test_apply_migration_leaves_unrelated_transactions_untouched(tmp_path):
     from migrate_taxonomy_v2 import apply_migration
     store = Store(home=tmp_path)
