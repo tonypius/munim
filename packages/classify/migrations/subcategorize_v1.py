@@ -472,3 +472,53 @@ def apply_migration(store) -> dict:
 
     store.db.commit()
     return report
+
+
+def _print_report(report: dict, heading: str) -> None:
+    print(f"\n=== {heading} ===")
+    print("\n--- Pattern-based subcategory assignments, by destination ---")
+    by_dest: dict[tuple, dict] = {}
+    flagged = []
+    for p, info in report["pattern"].items():
+        agg = by_dest.setdefault(info["destination"], {"count": 0})
+        agg["count"] += info["count"]
+        if not info["already_matches_category"] and info["count"] > 0:
+            flagged.append(p)
+    for (category, subcategory), agg in sorted(by_dest.items()):
+        print(f"  -> {category}:{subcategory:25s} n={agg['count']:4d}")
+    if flagged:
+        print(f"\n  WARNING: {len(flagged)} pattern(s) matched at least one "
+              f"transaction OUTSIDE their expected category -- these will "
+              f"be silently skipped by apply_migration, investigate before "
+              f"relying on that: {flagged}")
+    print(f"\n--- Health Care default ---")
+    print(f"  Health transactions -> subcategory='Care': "
+          f"n={report['health_care_default']['count']}")
+    print(f"\n--- Melvin loan fix ---")
+    print(f"  Transactions pending fix (of 2 total): "
+          f"n={report['melvin_fix']['count']}")
+
+
+if __name__ == "__main__":
+    import argparse
+    from munim.store import Store as _Store
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true",
+                        help="Write changes. Without this flag, dry-run only.")
+    args = parser.parse_args()
+
+    store = _Store()
+    print(f"Database: {store.home / 'munim.db'}")
+
+    if not args.apply:
+        report = plan_migration(store)
+        _print_report(report, "DRY RUN — no changes written")
+        print("\nRe-run with --apply to write these changes "
+              "(a backup is taken automatically first).")
+    else:
+        backup_path = backup_database(store.home)
+        print(f"Backup written to: {backup_path}")
+        report = apply_migration(store)
+        _print_report(report, "APPLIED — changes written")
+        print("\nDone. Verify with the Transactions page's subcategory filter.")
