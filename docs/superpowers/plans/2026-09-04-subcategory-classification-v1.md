@@ -914,7 +914,20 @@ Expected: FAIL — `ImportError: cannot import name 'backup_database'`.
 
 - [ ] **Step 3: Write `backup_database` and `apply_migration`**
 
-Append to `packages/classify/migrations/subcategorize_v1.py`, after
+Add three imports directly after the module docstring's closing `"""`
+(Task 1's implementer should have left no imports there — if you find
+`import shutil`, `from datetime import datetime`, `from pathlib import
+Path` already present and unused, that's a leftover from an earlier
+task-brief draft; otherwise add them now, as the first statements after
+the docstring, before the `# ---- taxonomy` comment section):
+
+```python
+import shutil
+from datetime import datetime
+from pathlib import Path
+```
+
+Then append to `packages/classify/migrations/subcategorize_v1.py`, after
 `plan_migration`:
 
 ```python
