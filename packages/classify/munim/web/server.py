@@ -64,6 +64,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(self._tags())
         elif route == "/api/accounts":
             self._send(self._accounts())
+        elif route == "/api/transfers":
+            self._send(self._transfers())
         elif route == "/api/dashboard":
             self._send(self._dashboard(q))
         elif route == "/api/contribute":
@@ -83,6 +85,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/tags/bulk":
             self._handle_tags_bulk()
+            return
+        if path == "/api/transfer/link":
+            self._handle_transfer_link()
+            return
+        if path == "/api/transfer/dismiss":
+            self._handle_transfer_dismiss()
+            return
+        if path == "/api/transfer/relink":
+            self._handle_transfer_relink()
             return
         if path != "/api/confirm":
             self._send({"error": "not found"}, status=404)
@@ -233,6 +244,44 @@ class Handler(BaseHTTPRequestHandler):
                             subcategory=subcategory)
         n = self.store.apply_subcategory(pattern, subcategory, kind)
         self._send({"ok": True, "updated": n})
+
+    def _handle_transfer_link(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        debit_id = data.get("debit_id")
+        credit_id = data.get("credit_id")
+        if not debit_id or not credit_id:
+            self._send({"error": "need debit_id and credit_id"}, status=400)
+            return
+        if (self.store.get_transaction(debit_id) is None
+                or self.store.get_transaction(credit_id) is None):
+            self._send({"error": "unknown transaction"}, status=404)
+            return
+        if self.store.is_linked(debit_id) or self.store.is_linked(credit_id):
+            self._send({"error": "already linked elsewhere"}, status=400)
+            return
+        self.store.link_transfer(debit_id, credit_id, confidence="confirmed")
+        self._send({"ok": True})
+
+    def _handle_transfer_dismiss(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        txn_id = data.get("id")
+        t = self.store.get_transaction(txn_id) if txn_id else None
+        if t is None:
+            self._send({"error": "unknown transaction"}, status=404)
+            return
+        if self.store.is_linked(txn_id):
+            self._send({"error": "already linked — nothing to dismiss"},
+                       status=400)
+            return
+        self.store.dismiss_transfer(txn_id)
+        self._send({"ok": True})
+
+    def _handle_transfer_relink(self):
+        from ..structural.transfer_matching import apply_auto_links
+        n = apply_auto_links(self.store)
+        self._send({"ok": True, "linked": n})
 
     # ---- data assembly --------------------------------------------------
     def _overview(self):
@@ -395,6 +444,35 @@ class Handler(BaseHTTPRequestHandler):
                 "months": len(have), "missing_months": missing,
             })
         return {"rows": rows}
+
+    def _transfers(self):
+        from ..structural.transfer_matching import find_transfer_candidates
+        txns = {t.id: t for t in self.store.all_transactions() if t.is_transfer}
+        linked_ids = set(self.store.transfer_link_map().keys())
+        dismissed_ids = self.store.dismissed_ids()
+        links = self.store.all_transfer_links()
+        n_auto = sum(1 for l in links if l["confidence"] == "auto")
+        n_confirmed = sum(1 for l in links if l["confidence"] == "confirmed")
+        candidates = find_transfer_candidates(self.store)
+        ambiguous_ids = {d for d, _ in candidates["ambiguous"]}
+        for _, cs in candidates["ambiguous"]:
+            ambiguous_ids.update(cs)
+        pending_all = [t for tid, t in txns.items()
+                       if tid not in linked_ids and tid not in dismissed_ids]
+        pending_only = [t for t in pending_all if t.id not in ambiguous_ids]
+        ambiguous_rows = [
+            {"debit": self._row(txns[d]),
+             "candidates": [self._row(txns[c]) for c in cs]}
+            for d, cs in candidates["ambiguous"]
+        ]
+        return {
+            "coverage": {"auto": n_auto, "confirmed": n_confirmed,
+                        "dismissed": len(dismissed_ids),
+                        "pending": len(pending_all)},
+            "ambiguous": ambiguous_rows,
+            "pending": [self._row(t) for t in
+                       sorted(pending_only, key=lambda t: t.date, reverse=True)],
+        }
 
     def _dashboard(self, q=None):
         from ..tree import get_tree, resolve, root_of
