@@ -147,6 +147,10 @@ Categories can carry an optional second level for finer-grained analysis — `Gr
 
 A transaction can also carry any number of manually-assigned tags — Business, Personal, a specific family member — for ownership/purpose tracking that's orthogonal to category. Tags are never auto-applied by any mechanism; every assignment is a deliberate action, one transaction at a time or an explicit one-time bulk apply. See `munim tags --help` and `munim tag --help`.
 
+## Transfer linking
+
+Transfers between your own accounts are detected structurally, but each leg still arrives as an independent transaction. `munim import` also runs a cross-import matching pass that pairs up debit/credit legs of the same transfer: unambiguous pairs are auto-linked, ambiguous ones (e.g. a shared amount claimed by multiple candidates) queue up for a quick manual call, and a permanently one-sided transaction can be dismissed from future matching. Once linked, ledger export posts the transfer's counter-leg against the real counterparty account instead of a generic clearing bucket. See `munim transfers --help`.
+
 ## Benchmarks
 
 Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [packages/classify/eval/RESULTS.md](packages/classify/eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.

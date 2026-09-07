@@ -66,6 +66,18 @@ never touched by the pipeline, memory, or the community dictionary; every
 row here is a deliberate human action. Not a column on `transactions` —
 look tags up separately, the same way `corrections` already works.
 
+### transfer_links
+Confirmed transfer pairs — `id`, `txn_id_a`, `txn_id_b`, `confidence`
+(`auto` / `manual`), `created_at`. Not columns on `transactions` — look
+links up separately, the same way `corrections` already works. Ledger
+export uses this table to post a linked transfer's counter-leg against
+the real counterparty account instead of a generic clearing bucket.
+
+### transfer_dismissals
+Transactions a user has confirmed are one-sided, not part of a transfer
+pair — `txn_id`, `dismissed_at`. Also not a column on `transactions`;
+excludes a transaction from future transfer-matching candidates.
+
 ### config
 Key/value JSON: `region`, `currency`, `categories`, `category_aliases`,
 `csv_profiles`, `schema_version`, `category_tree` (leaf -> ledger path under

@@ -18,6 +18,11 @@ other stage ever sets `subcategory`.
 | 6 | Fallback | `packages/classify/munim/fallback/` | TF-IDF char n-grams + logistic regression | provisional |
 | 7 | Review | `packages/classify/munim/cli.py review` | the user | **confirmed** |
 
+After classification, `munim import` also runs a cross-import
+transfer-matching pass, auto-linking unambiguous transfer pairs and
+queuing ambiguous ones for `munim transfers review` (see `munim
+transfers --help`).
+
 ## Precedence rules
 
 1. Transfer detection short-circuits everything (not spending).
