@@ -135,6 +135,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <p class="note">One row per imported account. Missing months mean missing
   statements — and missing statements mean transfers get miscounted as
   spending. <code>munim doctor</code> checks the same thing.</p>
+  <div id="netWorth" class="roots"></div>
   <div id="acctBody"></div>
 </section>
 
@@ -538,22 +539,68 @@ $("#dAccount").addEventListener("change",dashboard);
 
 /* accounts */
 async function accounts(){
-  const {rows}=await api("/api/accounts");
+  const {rows,net_worth}=await api("/api/accounts");
+  $("#netWorth").innerHTML=net_worth.counted===0?"":
+    `<div class="root"><div class="rootl">Assets</div><div class="rootv credit">${fmt(net_worth.assets,CUR)}</div></div>
+     <div class="root"><div class="rootl">Liabilities</div><div class="rootv debit">${fmt(net_worth.liabilities,CUR)}</div></div>
+     <div class="root"><div class="rootl">Net worth</div><div class="rootv ${net_worth.net>=0?"credit":"debit"}">${fmt(net_worth.net,CUR)}</div></div>
+     <div class="root"><div class="rootl">Coverage</div><div class="rootv">${net_worth.counted}/${net_worth.total} accounts</div></div>`;
   $("#acctBody").innerHTML=rows.length?`<table><thead><tr>
     <th>Account</th><th>Type</th><th class="num">Entries</th><th>Coverage</th>
     <th class="num">Spend</th><th class="num">Credits</th><th class="num">Transfers</th><th>Gaps</th>
+    <th>Opening balance</th><th class="num">Current balance</th>
   </tr></thead><tbody>`+rows.map(r=>`<tr>
     <td class="merchant">${esc(r.account)}</td>
     <td><span class="tag ${r.type==="Liabilities"?"person":""}">${r.type}</span></td>
     <td class="num">${r.n}</td>
-    <td class="num">${r.first} → ${r.last} (${r.months} mo)</td>
+    <td class="num">${r.first?`${r.first} → ${r.last} (${r.months} mo)`:"—"}</td>
     <td class="num debit">${fmt(r.debit,CUR)}</td>
     <td class="num credit">${fmt(r.credit,CUR)}</td>
     <td class="num">${r.transfers}</td>
-    <td>${r.missing_months.length?`<span class="tag" style="color:var(--ledger-red);border-color:var(--ledger-red)">${r.missing_months.join(", ")}</span>`:'<span class="tag confirmed">complete</span>'}</td>
+    <td>${r.missing_months.length?`<span class="tag" style="color:var(--ledger-red);border-color:var(--ledger-red)">${r.missing_months.join(", ")}</span>`:r.first?'<span class="tag confirmed">complete</span>':"—"}</td>
+    <td>${openingBalanceCell(r)}</td>
+    <td class="num">${r.current_balance==null?"—":fmt(r.current_balance,CUR)}</td>
   </tr>`).join("")+`</tbody></table>`
   :`<p class="empty">No accounts yet — import a statement.</p>`;
 }
+function openingBalanceCell(r){
+  if(r.opening_balance){
+    return `<div class="merchant">${fmt(r.opening_balance.balance,CUR)} as of ${r.opening_balance.as_of}</div>
+      <button class="obEdit" data-account="${esc(r.account)}" data-balance="${r.opening_balance.balance}" data-asof="${r.opening_balance.as_of}" style="font-size:12px">edit</button>`;
+  }
+  return `<button class="obEdit" data-account="${esc(r.account)}" data-balance="" data-asof="" style="font-size:12px">set opening balance</button>`;
+}
+$("#acctBody").addEventListener("click",e=>{
+  const btn=e.target.closest(".obEdit");
+  if(!btn)return;
+  const td=btn.closest("td");
+  const{account,balance,asof}=btn.dataset;
+  td.innerHTML=`<form class="obForm" data-account="${esc(account)}">
+    <input type="number" step="0.01" name="balance" value="${esc(balance)}" placeholder="Amount" style="width:100px" required>
+    <input type="date" name="as_of" value="${esc(asof)}" required>
+    <button type="submit" class="confirm" style="padding:4px 9px">Save</button>
+  </form>`;
+  td.querySelector("input").focus();
+});
+$("#acctBody").addEventListener("submit",async e=>{
+  const form=e.target.closest(".obForm");
+  if(!form)return;
+  e.preventDefault();
+  const account=form.dataset.account;
+  const balance=parseFloat(form.balance.value);
+  const as_of=form.as_of.value;
+  const btn=form.querySelector("button");
+  btn.disabled=true;
+  try{
+    await api("/api/accounts/opening-balance",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({account,balance,as_of})});
+    await accounts();
+  }catch(err){
+    alert("Couldn't save opening balance: "+err.message);
+    btn.disabled=false;
+  }
+});
 
 /* transfers */
 function candOption(c){

@@ -152,3 +152,14 @@ def test_post_opening_balance_rejects_invalid_date(tmp_path):
         assert reloaded.get_config("account_opening_balances", {}) == {}
     finally:
         srv.shutdown()
+
+
+def test_index_page_includes_net_worth_band(tmp_path):
+    store = Store(home=tmp_path)
+    srv, port = _server(store)
+    try:
+        html = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/", timeout=3).read().decode()
+        assert 'id="netWorth"' in html
+    finally:
+        srv.shutdown()
