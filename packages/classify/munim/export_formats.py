@@ -47,8 +47,10 @@ def to_ledger(txns: list[Transaction], tree: dict | None = None,
 
     out = []
     for t in sorted(txns, key=lambda x: x.date):
+        counterpart = by_id.get(links.get(t.id))
         if (t.is_transfer and t.direction == Direction.CREDIT
-                and links.get(t.id) in by_id):
+                and counterpart is not None and counterpart.is_transfer
+                and counterpart.direction == Direction.DEBIT):
             continue  # the linked debit leg's own entry already covers this pair
         payee = t.merchant_norm or t.payee_handle or t.description_raw[:48]
         path = resolve(tree, t.category)
@@ -59,9 +61,9 @@ def to_ledger(txns: list[Transaction], tree: dict | None = None,
         note = f"    ; stage: {t.stage.value}, status: {t.status.value}"
         amt = f"{t.amount:.2f} {t.currency}"
         if t.is_transfer:
-            counterpart_id = links.get(t.id)
-            counterpart = by_id.get(counterpart_id) if counterpart_id else None
-            counter = (acct_path(counterpart) if counterpart
+            valid_counterpart = (counterpart if counterpart is not None
+                                and counterpart.is_transfer else None)
+            counter = (acct_path(valid_counterpart) if valid_counterpart
                       else resolve(tree, "Transfers").replace(" ", "-"))
             legs = [f"    {counter}    {amt}",
                     f"    {acct_path(t)}"]

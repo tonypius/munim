@@ -413,6 +413,26 @@ def test_ledger_export_linked_transfer_emits_one_entry_not_two(tmp_path):
     assert out.count("Assets:tony-hdfc-savings") == 1
 
 
+def test_ledger_export_reclassified_debit_still_shows_credit_leg(tmp_path):
+    """If a linked debit is later reclassified away from Transfers (e.g. via
+    `munim review`), the stale transfer_links row must not cause the
+    still-is_transfer credit leg to be silently dropped from the export --
+    it must fall back to the generic Equity:Transfers bucket instead of
+    vanishing entirely."""
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "tony-hdfc-savings")
+    debit.is_transfer = False
+    debit.category = "Shopping"
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "tony-hdfc-regalia-cc")
+    tree = default_tree(["Transfers", "Shopping"])
+    account_types = {"tony-hdfc-savings": "Assets", "tony-hdfc-regalia-cc": "Liabilities"}
+    links = {"d1": "c1", "c1": "d1"}
+    out = to_ledger([debit, credit], tree=tree, account_types=account_types, links=links)
+    assert "Liabilities:tony-hdfc-regalia-cc" in out
+    assert "Equity:Transfers" in out
+
+
 def test_transfers_review_rejects_double_linking_same_credit(tmp_path, monkeypatch):
     """Two debits that both show the same credit as their sole candidate
     (both flagged ambiguous, per the earlier shared-credit fix) must not
