@@ -305,8 +305,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send({"error": f"{as_of} is not a valid date (use YYYY-MM-DD)"},
                        status=400)
             return
+        try:
+            balance = float(balance)
+        except (ValueError, TypeError):
+            self._send({"error": f"{balance} is not a valid number"}, status=400)
+            return
         balances = self.store.get_config("account_opening_balances", {}) or {}
-        balances[account] = {"balance": float(balance), "as_of": as_of}
+        balances[account] = {"balance": balance, "as_of": as_of}
         self.store.set_config("account_opening_balances", balances)
         self._send({"ok": True})
 
@@ -465,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
         for acct in sorted(all_accounts):
             ts = by_acct.get(acct, [])
             opening = opening_balances.get(acct)
-            current = compute_account_balance(self.store, acct)
+            current = compute_account_balance(self.store, acct, transactions=ts)
             acct_type = account_root(self.store, acct)
             if current is not None:
                 counted += 1

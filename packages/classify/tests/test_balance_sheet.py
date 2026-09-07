@@ -200,3 +200,20 @@ def test_balance_sheet_includes_account_known_only_via_account_types(
     out = result.output
     assert "hdfc-cc" in out
     assert "1/2" in out
+
+
+def test_compute_balance_uses_provided_transactions_list(tmp_path):
+    """The optional `transactions` parameter lets callers that already
+    fetched the transaction list avoid a redundant store.all_transactions()
+    scan per account."""
+    from munim.balance_sheet import compute_account_balance
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-06-01"}})
+    only_this_accounts_txns = [
+        Transaction(date="2026-06-05", amount=500, direction=Direction.CREDIT,
+                    description_raw="SALARY", account="bank"),
+    ]
+    balance = compute_account_balance(store, "bank",
+                                      transactions=only_this_accounts_txns)
+    assert balance == 1500.0

@@ -163,3 +163,54 @@ def test_index_page_includes_net_worth_band(tmp_path):
         assert 'id="netWorth"' in html
     finally:
         srv.shutdown()
+
+
+def test_api_accounts_calls_all_transactions_once_not_per_account(tmp_path, monkeypatch):
+    """Regression test for the N+1 scan found in final review: fetching
+    /api/accounts with N accounts must not call store.all_transactions()
+    N+1 times -- once for the initial by-account grouping, and zero
+    additional times inside the per-account balance computation."""
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances", {
+        "a1": {"balance": 100.0, "as_of": "2026-06-01"},
+        "a2": {"balance": 200.0, "as_of": "2026-06-01"},
+        "a3": {"balance": 300.0, "as_of": "2026-06-01"},
+    })
+    store.upsert_transactions([
+        Transaction(date="2026-06-05", amount=10, direction=Direction.CREDIT,
+                    description_raw="X", account="a1"),
+        Transaction(date="2026-06-05", amount=10, direction=Direction.CREDIT,
+                    description_raw="X", account="a2"),
+        Transaction(date="2026-06-05", amount=10, direction=Direction.CREDIT,
+                    description_raw="X", account="a3"),
+    ])
+    calls = []
+    original = Store.all_transactions
+    def counting(self):
+        calls.append(1)
+        return original(self)
+    monkeypatch.setattr(Store, "all_transactions", counting)
+    srv, port = _server(store)
+    try:
+        d = _get(port, "/api/accounts")
+        assert len(d["rows"]) == 3
+        assert len(calls) == 1
+    finally:
+        srv.shutdown()
+
+
+def test_post_opening_balance_rejects_non_numeric_balance(tmp_path):
+    store = Store(home=tmp_path)
+    srv, port = _server(store)
+    try:
+        try:
+            _post(port, "/api/accounts/opening-balance",
+                 {"account": "bank", "balance": "not-a-number",
+                  "as_of": "2026-06-01"})
+            assert False, "expected HTTPError"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        reloaded = Store(home=tmp_path)
+        assert reloaded.get_config("account_opening_balances", {}) == {}
+    finally:
+        srv.shutdown()

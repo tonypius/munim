@@ -90,6 +90,14 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
 @media (max-width:700px){
   body{background-image:none}main{padding:20px 12px 60px}
   .raw{display:none}th:last-child,td:last-child{display:none}
+  /* The Accounts table gained two trailing columns (opening/current
+     balance); the generic last-child rule above would now hide
+     "Current balance" -- the headline figure this feature adds -- instead
+     of "Gaps", which was the intended target when that rule was written.
+     Scope an override to this one table: hide Gaps (8th column) and
+     restore the last column (Current balance). */
+  #acctBody th:nth-child(8),#acctBody td:nth-child(8){display:none}
+  #acctBody th:last-child,#acctBody td:last-child{display:table-cell}
 }
 @media (prefers-reduced-motion:no-preference){
   section.active{animation:settle .18s ease-out}
