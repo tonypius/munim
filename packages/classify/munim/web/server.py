@@ -257,8 +257,11 @@ class Handler(BaseHTTPRequestHandler):
                 or self.store.get_transaction(credit_id) is None):
             self._send({"error": "unknown transaction"}, status=404)
             return
-        if self.store.is_linked(debit_id) or self.store.is_linked(credit_id):
-            self._send({"error": "already linked elsewhere"}, status=400)
+        if (self.store.is_linked(debit_id) or self.store.is_linked(credit_id)
+                or self.store.is_dismissed(debit_id)
+                or self.store.is_dismissed(credit_id)):
+            self._send({"error": "already linked or dismissed elsewhere"},
+                       status=400)
             return
         self.store.link_transfer(debit_id, credit_id, confidence="confirmed")
         self._send({"ok": True})
@@ -457,9 +460,14 @@ class Handler(BaseHTTPRequestHandler):
         ambiguous_ids = {d for d, _ in candidates["ambiguous"]}
         for _, cs in candidates["ambiguous"]:
             ambiguous_ids.update(cs)
+        auto_ids = set()
+        for d, c in candidates["auto"]:
+            auto_ids.add(d)
+            auto_ids.add(c)
         pending_all = [t for tid, t in txns.items()
                        if tid not in linked_ids and tid not in dismissed_ids]
-        pending_only = [t for t in pending_all if t.id not in ambiguous_ids]
+        pending_only = [t for t in pending_all
+                       if t.id not in ambiguous_ids and t.id not in auto_ids]
         ambiguous_rows = [
             {"debit": self._row(txns[d]),
              "candidates": [self._row(txns[c]) for c in cs]}

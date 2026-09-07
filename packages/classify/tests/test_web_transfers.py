@@ -93,6 +93,48 @@ def test_post_transfer_link_confirms_a_pair(tmp_path):
         srv.shutdown()
 
 
+def test_api_transfers_excludes_auto_matchable_from_pending_display(tmp_path):
+    """A transfer with an exact, unambiguous candidate (the 'auto' bucket
+    from find_transfer_candidates) must not be shown in the display
+    'pending' list as if it had no candidate -- that list's UI presents
+    Dismiss as the only action, which is irreversible and wrong here; the
+    correct action is the existing 'Re-run auto-link' button. It must
+    still be counted in coverage.pending, since it genuinely isn't linked
+    yet."""
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    srv, port = _server(store)
+    try:
+        d = _get(port, "/api/transfers")
+        assert d["ambiguous"] == []
+        assert [p["id"] for p in d["pending"]] == []
+        assert d["coverage"]["pending"] == 2
+    finally:
+        srv.shutdown()
+
+
+def test_post_transfer_link_rejects_dismissed_transaction(tmp_path):
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    store.dismiss_transfer("d1")
+    srv, port = _server(store)
+    try:
+        try:
+            _post(port, "/api/transfer/link",
+                 {"debit_id": "d1", "credit_id": "c1"})
+            assert False, "expected HTTPError"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+        reloaded = Store(home=tmp_path)
+        assert not reloaded.is_linked("d1")
+    finally:
+        srv.shutdown()
+
+
 def test_post_transfer_link_rejects_already_linked(tmp_path):
     store = Store(home=tmp_path)
     debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
