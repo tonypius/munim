@@ -68,7 +68,7 @@ look tags up separately, the same way `corrections` already works.
 
 ### transfer_links
 Confirmed transfer pairs — `id`, `txn_id_a`, `txn_id_b`, `confidence`
-(`auto` / `manual`), `created_at`. Not columns on `transactions` — look
+(`auto` / `confirmed`), `created_at`. Not columns on `transactions` — look
 links up separately, the same way `corrections` already works. Ledger
 export uses this table to post a linked transfer's counter-leg against
 the real counterparty account instead of a generic clearing bucket.
