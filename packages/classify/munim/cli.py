@@ -1151,8 +1151,8 @@ def balance_sheet():
     txn_accounts = {r["account"] for r in store.db.execute(
         "SELECT DISTINCT account FROM transactions").fetchall()}
     opening_balances = store.get_config("account_opening_balances", {}) or {}
-    accounts = txn_accounts | set(opening_balances.keys())
     account_types = store.get_config("account_types", {}) or {}
+    accounts = txn_accounts | set(opening_balances.keys()) | set(account_types.keys())
 
     table = Table(title="Balance sheet")
     table.add_column("Account")

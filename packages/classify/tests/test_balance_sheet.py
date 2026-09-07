@@ -177,3 +177,26 @@ def test_balance_sheet_includes_account_with_opening_balance_but_no_transactions
     assert "fixed-deposit" in out
     assert "50,000.00" in out or "50000.00" in out
     assert "1/1" in out
+
+
+def test_balance_sheet_includes_account_known_only_via_account_types(
+        tmp_path, monkeypatch):
+    """An account the user has told munim about via `accounts type` (e.g.
+    right after opening a new credit card, before either an opening
+    balance or a single transaction exists for it) must still surface as
+    a 'no opening balance' row -- not vanish, which would let the
+    coverage caveat overstate completeness."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("account_types", {"hdfc-cc": "Liabilities"})
+    store.set_config("account_opening_balances", {
+        "hdfc-savings": {"balance": 1000.0, "as_of": "2026-06-01"},
+    })
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["balance-sheet"])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "hdfc-cc" in out
+    assert "1/2" in out
