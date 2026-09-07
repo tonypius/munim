@@ -151,6 +151,10 @@ A transaction can also carry any number of manually-assigned tags — Business, 
 
 Transfers between your own accounts are detected structurally, but each leg still arrives as an independent transaction. `munim import` also runs a cross-import matching pass that pairs up debit/credit legs of the same transfer: unambiguous pairs are auto-linked, ambiguous ones (e.g. a shared amount claimed by multiple candidates) queue up for a quick manual call, and a permanently one-sided transaction can be dismissed from future matching. Once linked, ledger export posts the transfer's counter-leg against the real counterparty account instead of a generic clearing bucket. See `munim transfers --help`.
 
+## Balance sheet / net worth
+
+Set each account's starting point once with `munim accounts set-opening-balance`, then `munim balance-sheet` computes every account's current balance — opening balance plus every transaction since — and totals Assets minus Liabilities into a net worth figure. It's cost-basis only, no market pricing, and an account with no opening balance set is excluded from the total and called out explicitly rather than silently treated as zero. See `munim balance-sheet --help` and `munim accounts set-opening-balance --help`.
+
 ## Benchmarks
 
 Run `make eval`. Results on the synthetic Indian fixture set ship with each release in [packages/classify/eval/RESULTS.md](packages/classify/eval/RESULTS.md). If you can donate an anonymized labeled statement (descriptions + categories only), open an issue — real fixtures are the most valuable contribution possible.

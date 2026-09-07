@@ -83,7 +83,10 @@ Key/value JSON: `region`, `currency`, `categories`, `category_aliases`,
 `csv_profiles`, `schema_version`, `category_tree` (leaf -> ledger path under
 the five roots: Assets, Liabilities, Equity, Income, Expenses),
 `subcategories` (category -> list of allowed subcategory names), `tags`
-(the curated tag list), and `account_types` (account -> Assets | Liabilities).
+(the curated tag list), `account_types` (account -> Assets | Liabilities),
+and `account_opening_balances` (account -> `{balance, as_of}`, set via
+`munim accounts set-opening-balance`; an account with no entry here is
+excluded from `munim balance-sheet`, not treated as zero).
 
 The tree is a DISPLAY mapping consumed by exporters and the dashboard;
 `transactions.category` always stores the flat leaf. Consumers wanting
