@@ -95,6 +95,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/transfer/relink":
             self._handle_transfer_relink()
             return
+        if path == "/api/accounts/opening-balance":
+            self._handle_set_opening_balance()
+            return
         if path != "/api/confirm":
             self._send({"error": "not found"}, status=404)
             return
@@ -286,6 +289,27 @@ class Handler(BaseHTTPRequestHandler):
         n = apply_auto_links(self.store)
         self._send({"ok": True, "linked": n})
 
+    def _handle_set_opening_balance(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length) or b"{}")
+        account = data.get("account")
+        balance = data.get("balance")
+        as_of = data.get("as_of")
+        if not account or balance is None or not as_of:
+            self._send({"error": "need account, balance, and as_of"}, status=400)
+            return
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(as_of)
+        except (ValueError, TypeError):
+            self._send({"error": f"{as_of} is not a valid date (use YYYY-MM-DD)"},
+                       status=400)
+            return
+        balances = self.store.get_config("account_opening_balances", {}) or {}
+        balances[account] = {"balance": float(balance), "as_of": as_of}
+        self.store.set_config("account_opening_balances", balances)
+        self._send({"ok": True})
+
     # ---- data assembly --------------------------------------------------
     def _overview(self):
         txns = self.store.all_transactions()
@@ -425,28 +449,60 @@ class Handler(BaseHTTPRequestHandler):
 
     def _accounts(self):
         from ..doctor import _month_range
+        from ..tree import account_root
+        from ..balance_sheet import compute_account_balance
         by_acct: dict[str, list] = defaultdict(list)
         for t in self.store.all_transactions():
             by_acct[t.account].append(t)
+        opening_balances = self.store.get_config(
+            "account_opening_balances", {}) or {}
+        account_types = self.store.get_config("account_types", {}) or {}
+        all_accounts = (set(by_acct.keys()) | set(opening_balances.keys())
+                       | set(account_types.keys()))
         rows = []
-        for acct, ts in sorted(by_acct.items()):
-            dates = sorted(t.date for t in ts)
-            have = {d.isoformat()[:7] for d in dates}
-            missing = [m for m in _month_range(dates[0], dates[-1])
-                       if m not in have]
-            from ..tree import account_root
-            rows.append({
-                "account": acct, "type": account_root(self.store, acct),
-                "n": len(ts),
-                "first": dates[0].isoformat(), "last": dates[-1].isoformat(),
-                "debit": sum(t.amount for t in ts
-                             if t.direction.value == "debit" and not t.is_transfer),
-                "credit": sum(t.amount for t in ts
-                              if t.direction.value == "credit" and not t.is_transfer),
-                "transfers": sum(1 for t in ts if t.is_transfer),
-                "months": len(have), "missing_months": missing,
-            })
-        return {"rows": rows}
+        total_assets = total_liabilities = 0.0
+        counted = 0
+        for acct in sorted(all_accounts):
+            ts = by_acct.get(acct, [])
+            opening = opening_balances.get(acct)
+            current = compute_account_balance(self.store, acct)
+            acct_type = account_root(self.store, acct)
+            if current is not None:
+                counted += 1
+                if acct_type == "Liabilities":
+                    total_liabilities += current
+                else:
+                    total_assets += current
+            if ts:
+                dates = sorted(t.date for t in ts)
+                have = {d.isoformat()[:7] for d in dates}
+                missing = [m for m in _month_range(dates[0], dates[-1])
+                          if m not in have]
+                row = {
+                    "account": acct, "type": acct_type, "n": len(ts),
+                    "first": dates[0].isoformat(), "last": dates[-1].isoformat(),
+                    "debit": sum(t.amount for t in ts
+                                if t.direction.value == "debit" and not t.is_transfer),
+                    "credit": sum(t.amount for t in ts
+                                 if t.direction.value == "credit" and not t.is_transfer),
+                    "transfers": sum(1 for t in ts if t.is_transfer),
+                    "months": len(have), "missing_months": missing,
+                }
+            else:
+                row = {
+                    "account": acct, "type": acct_type, "n": 0,
+                    "first": None, "last": None,
+                    "debit": 0.0, "credit": 0.0, "transfers": 0,
+                    "months": 0, "missing_months": [],
+                }
+            row["opening_balance"] = opening
+            row["current_balance"] = current
+            rows.append(row)
+        return {"rows": rows, "net_worth": {
+            "assets": total_assets, "liabilities": total_liabilities,
+            "net": total_assets - total_liabilities,
+            "counted": counted, "total": len(all_accounts),
+        }}
 
     def _transfers(self):
         from ..structural.transfer_matching import find_transfer_candidates
