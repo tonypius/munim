@@ -109,6 +109,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <button data-tab="dashboard">Dashboard</button>
   <button data-tab="transactions">Transactions</button>
   <button data-tab="accounts">Accounts</button>
+  <button data-tab="transfers">Transfers</button>
   <button data-tab="categories">Categories</button>
   <button data-tab="rules">Rules</button>
   <button data-tab="contribute">Contribute</button>
@@ -135,6 +136,17 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   statements — and missing statements mean transfers get miscounted as
   spending. <code>munim doctor</code> checks the same thing.</p>
   <div id="acctBody"></div>
+</section>
+
+<section id="transfers">
+  <h2>Settling accounts</h2>
+  <p class="note">Debits and credits across your own accounts, paired up.
+  Auto-linked pairs are exact, unambiguous matches; the rest need your
+  pick. Dismiss a transfer that will genuinely never have a counterpart
+  (e.g. money sent to an untracked account) so it stops appearing here.</p>
+  <div id="transfersMeta" class="note"></div>
+  <div class="controls"><button id="relinkBtn" class="confirm">Re-run auto-link</button></div>
+  <div id="transfersBody"></div>
 </section>
 
 <section id="review" class="active">
@@ -543,7 +555,95 @@ async function accounts(){
   :`<p class="empty">No accounts yet — import a statement.</p>`;
 }
 
-const load=t=>({review,dashboard,transactions,accounts,categories,rules,contribute}[t]||(()=>{}))();
+/* transfers */
+function candOption(c){
+  return `<option value="${c.id}">${esc(c.account)} · ${c.date} · ${fmt(c.amount,c.currency)}</option>`;
+}
+function ambiguousRow(r){
+  const d=r.debit;
+  return `<tr data-debit="${d.id}">
+    <td class="num">${d.date}</td>
+    <td><div class="merchant">${esc(d.merchant)||"—"}</div><div class="raw">${esc(d.raw)}</div></td>
+    ${amountCell(d)}
+    <td class="merchant">${esc(d.account)}</td>
+    <td><select>${r.candidates.map(candOption).join("")}</select></td>
+    <td><button class="confirm linkBtn">Link</button> <button class="dismissBtn">Dismiss</button></td>
+  </tr>`;
+}
+function pendingRow(r){
+  return `<tr data-id="${r.id}">
+    <td class="num">${r.date}</td>
+    <td><div class="merchant">${esc(r.merchant)||"—"}</div><div class="raw">${esc(r.raw)}</div></td>
+    ${amountCell(r)}
+    <td class="merchant">${esc(r.account)}</td>
+    <td><button class="dismissBtn">Dismiss</button></td>
+  </tr>`;
+}
+async function transfers(){
+  const d=await api("/api/transfers");
+  const cov=d.coverage;
+  $("#transfersMeta").innerHTML=`<b>${cov.auto+cov.confirmed}</b> linked (${cov.auto} auto, ${cov.confirmed} confirmed) · <b>${cov.dismissed}</b> dismissed · <b>${cov.pending}</b> still pending`;
+  const ambTable=d.ambiguous.length?`<table><thead><tr>
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Account</th><th>Candidate</th><th></th>
+  </tr></thead><tbody>`+d.ambiguous.map(ambiguousRow).join("")+`</tbody></table>`
+    :`<p class="empty">Nothing ambiguous — the queue is empty.</p>`;
+  const pendTable=d.pending.length?`<table><thead><tr>
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Account</th><th></th>
+  </tr></thead><tbody>`+d.pending.map(pendingRow).join("")+`</tbody></table>`
+    :`<p class="empty">Nothing pending — every transfer has a candidate or a decision.</p>`;
+  $("#transfersBody").innerHTML=
+    `<h2 style="font-size:16px">Ambiguous (${d.ambiguous.length})</h2>${ambTable}
+     <h2 style="font-size:16px;margin-top:26px">Pending, no candidate yet (${d.pending.length})</h2>${pendTable}`;
+}
+$("#transfersBody").addEventListener("click", async e=>{
+  const linkBtn=e.target.closest(".linkBtn");
+  const dismissBtn=e.target.closest(".dismissBtn");
+  if(linkBtn){
+    const tr=linkBtn.closest("tr");
+    const debit_id=tr.dataset.debit;
+    const credit_id=tr.querySelector("select").value;
+    linkBtn.disabled=true;
+    try{
+      await api("/api/transfer/link",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({debit_id,credit_id})});
+      await transfers();
+    }catch(err){
+      alert("Link failed: "+err.message);
+      linkBtn.disabled=false;
+    }
+    return;
+  }
+  if(dismissBtn){
+    const tr=dismissBtn.closest("tr");
+    const id=tr.dataset.debit||tr.dataset.id;
+    dismissBtn.disabled=true;
+    try{
+      await api("/api/transfer/dismiss",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id})});
+      await transfers();
+    }catch(err){
+      alert("Dismiss failed: "+err.message);
+      dismissBtn.disabled=false;
+    }
+  }
+});
+$("#relinkBtn").addEventListener("click",async()=>{
+  const btn=$("#relinkBtn");const orig=btn.textContent;
+  btn.disabled=true;btn.textContent="…";
+  try{
+    const res=await api("/api/transfer/relink",{method:"POST"});
+    await transfers();
+    btn.textContent=`✓ ${res.linked} linked`;
+    setTimeout(()=>{btn.textContent=orig;btn.disabled=false},1200);
+  }catch(err){
+    alert("Re-link failed: "+err.message);
+    btn.disabled=false;btn.textContent=orig;
+  }
+});
+
+const load=t=>({review,dashboard,transactions,accounts,transfers,categories,rules,contribute}[t]||(()=>{}))();
 (async()=>{await categories();await overview();review()})();
 </script>
 </body>

@@ -189,3 +189,17 @@ def test_post_transfer_relink_runs_auto_linking(tmp_path):
         assert reloaded.linked_counterpart("d1") == "c1"
     finally:
         srv.shutdown()
+
+
+def test_index_page_includes_transfers_tab(tmp_path):
+    store = Store(home=tmp_path)
+    srv, port = _server(store)
+    try:
+        html = urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/", timeout=3).read().decode()
+        assert 'data-tab="transfers"' in html
+        assert 'id="transfersBody"' in html
+        assert 'id="transfersMeta"' in html
+        assert 'id="relinkBtn"' in html
+    finally:
+        srv.shutdown()
