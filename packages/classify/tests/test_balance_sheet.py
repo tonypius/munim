@@ -155,3 +155,25 @@ def test_balance_sheet_command_shows_net_worth_and_coverage(tmp_path, monkeypatc
     assert "1,250.00" in out or "1250.00" in out
     assert "2/3" in out  # 2 of 3 known accounts have a starting point
     assert "untracked" in out
+
+
+def test_balance_sheet_includes_account_with_opening_balance_but_no_transactions(
+        tmp_path, monkeypatch):
+    """An account can have its opening balance set before its first import
+    (e.g. setting up all accounts up front) -- it must still appear in the
+    balance sheet and count toward net worth, not vanish because it has
+    zero rows in `transactions`."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances", {
+        "fixed-deposit": {"balance": 50000.0, "as_of": "2026-06-01"},
+    })
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["balance-sheet"])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "fixed-deposit" in out
+    assert "50,000.00" in out or "50000.00" in out
+    assert "1/1" in out

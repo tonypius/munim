@@ -1148,8 +1148,10 @@ def balance_sheet():
     zero."""
     from .balance_sheet import compute_account_balance
     store = _store()
-    accounts = [r["account"] for r in store.db.execute(
-        "SELECT DISTINCT account FROM transactions").fetchall()]
+    txn_accounts = {r["account"] for r in store.db.execute(
+        "SELECT DISTINCT account FROM transactions").fetchall()}
+    opening_balances = store.get_config("account_opening_balances", {}) or {}
+    accounts = txn_accounts | set(opening_balances.keys())
     account_types = store.get_config("account_types", {}) or {}
 
     table = Table(title="Balance sheet")
