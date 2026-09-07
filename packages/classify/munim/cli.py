@@ -766,6 +766,30 @@ def accounts_type(account: str, root: str):
     console.print(f"[green]{account} → {root}[/green]")
 
 
+@acct_app.command("set-opening-balance")
+def accounts_set_opening_balance(
+    account: str,
+    amount: float,
+    as_of: str = typer.Argument(..., help="Date the balance was true, YYYY-MM-DD"),
+):
+    """Record a starting balance for an account, copied from your oldest
+    available statement. Needed for `munim balance-sheet` to compute a
+    current balance for this account — without it, the account is
+    excluded from the balance sheet entirely."""
+    from datetime import date as _date
+    try:
+        _date.fromisoformat(as_of)
+    except ValueError:
+        console.print(f"[red]{as_of} is not a valid date (use YYYY-MM-DD).[/red]")
+        raise typer.Exit(1)
+    store = _store()
+    balances = store.get_config("account_opening_balances", {}) or {}
+    balances[account] = {"balance": amount, "as_of": as_of}
+    store.set_config("account_opening_balances", balances)
+    console.print(f"[green]{account}: opening balance {amount:,.2f} "
+                  f"as of {as_of}.[/green]")
+
+
 # ---------------------------------------------------------------- transfers
 transfers_app = typer.Typer(help="Link transfer pairs across accounts.",
                             no_args_is_help=True)
