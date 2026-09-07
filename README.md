@@ -153,7 +153,7 @@ Transfers between your own accounts are detected structurally, but each leg stil
 
 ## Balance sheet / net worth
 
-Set each account's starting point once with `munim accounts set-opening-balance`, then `munim balance-sheet` computes every account's current balance — opening balance plus every transaction since — and totals Assets minus Liabilities into a net worth figure. It's cost-basis only, no market pricing, and an account with no opening balance set is excluded from the total and called out explicitly rather than silently treated as zero. See `munim balance-sheet --help` and `munim accounts set-opening-balance --help`.
+Set each account's starting point once with `munim accounts set-opening-balance`, then `munim balance-sheet` computes every account's current balance — opening balance plus every transaction since — and totals Assets minus Liabilities into a net worth figure. It's cost-basis only, no market pricing, and an account with no opening balance set is excluded from the total and called out explicitly rather than silently treated as zero. See `munim balance-sheet --help` and `munim accounts set-opening-balance --help`. `munim web`'s Accounts tab shows and edits the same opening balances and net worth from the browser.
 
 ## Benchmarks
 
