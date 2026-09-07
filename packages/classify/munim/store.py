@@ -8,6 +8,7 @@ Tables:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -62,6 +63,17 @@ CREATE TABLE IF NOT EXISTS tags (
     txn_id TEXT NOT NULL,
     tag TEXT NOT NULL,
     PRIMARY KEY (txn_id, tag)
+);
+CREATE TABLE IF NOT EXISTS transfer_links (
+    id TEXT PRIMARY KEY,
+    txn_id_a TEXT NOT NULL,
+    txn_id_b TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS transfer_dismissals (
+    txn_id TEXT PRIMARY KEY,
+    dismissed_at TEXT DEFAULT (datetime('now'))
 );
 """
 
@@ -333,3 +345,62 @@ class Store:
                 (txn_id, tag))
         self.db.commit()
         return len(ids)
+
+    # ---- transfer links ---------------------------------------------
+    def link_transfer(self, txn_id_a: str, txn_id_b: str,
+                      confidence: str = "auto") -> None:
+        """Record that txn_id_a and txn_id_b are the two legs of one
+        real-world transfer. Idempotent: linking the same pair twice is
+        a no-op, not a duplicate row."""
+        link_id = hashlib.sha1(
+            f"{txn_id_a}|{txn_id_b}".encode()).hexdigest()[:16]
+        self.db.execute(
+            "INSERT OR IGNORE INTO transfer_links"
+            "(id, txn_id_a, txn_id_b, confidence) VALUES (?,?,?,?)",
+            (link_id, txn_id_a, txn_id_b, confidence))
+        self.db.commit()
+
+    def is_linked(self, txn_id: str) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM transfer_links WHERE txn_id_a=? OR txn_id_b=?",
+            (txn_id, txn_id)).fetchone()
+        return row is not None
+
+    def linked_counterpart(self, txn_id: str) -> str | None:
+        row = self.db.execute(
+            "SELECT txn_id_a, txn_id_b FROM transfer_links "
+            "WHERE txn_id_a=? OR txn_id_b=?", (txn_id, txn_id)).fetchone()
+        if not row:
+            return None
+        return row["txn_id_b"] if row["txn_id_a"] == txn_id else row["txn_id_a"]
+
+    def transfer_link_map(self) -> dict[str, str]:
+        """Every linked txn_id -> its counterpart, both directions
+        present as keys, for O(1) lookup either way."""
+        out: dict[str, str] = {}
+        for row in self.db.execute(
+                "SELECT txn_id_a, txn_id_b FROM transfer_links").fetchall():
+            out[row["txn_id_a"]] = row["txn_id_b"]
+            out[row["txn_id_b"]] = row["txn_id_a"]
+        return out
+
+    def all_transfer_links(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT txn_id_a, txn_id_b, confidence, created_at "
+            "FROM transfer_links ORDER BY created_at").fetchall()]
+
+    def dismiss_transfer(self, txn_id: str) -> None:
+        self.db.execute(
+            "INSERT OR IGNORE INTO transfer_dismissals(txn_id) VALUES (?)",
+            (txn_id,))
+        self.db.commit()
+
+    def is_dismissed(self, txn_id: str) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM transfer_dismissals WHERE txn_id=?",
+            (txn_id,)).fetchone()
+        return row is not None
+
+    def dismissed_ids(self) -> set[str]:
+        return {r["txn_id"] for r in self.db.execute(
+            "SELECT txn_id FROM transfer_dismissals").fetchall()}
