@@ -126,3 +126,32 @@ def test_compute_balance_ignores_other_accounts(tmp_path):
                     description_raw="OTHER ACCOUNT", account="some-other-account"),
     ])
     assert compute_account_balance(store, "bank") == 1000.0
+
+
+def test_balance_sheet_command_shows_net_worth_and_coverage(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("account_types", {"cc": "Liabilities"})
+    store.set_config("account_opening_balances", {
+        "bank": {"balance": 1000.0, "as_of": "2026-06-01"},
+        "cc": {"balance": 200.0, "as_of": "2026-06-01"},
+    })
+    store.upsert_transactions([
+        Transaction(date="2026-06-05", amount=500, direction=Direction.CREDIT,
+                    description_raw="SALARY", account="bank"),
+        Transaction(date="2026-06-05", amount=50, direction=Direction.DEBIT,
+                    description_raw="PURCHASE", account="cc"),
+        Transaction(date="2026-06-05", amount=10, direction=Direction.DEBIT,
+                    description_raw="NO OPENING BALANCE", account="untracked"),
+    ])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["balance-sheet"])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    # bank: 1000 + 500 = 1500 (asset). cc: 200 + 50 = 250 (liability).
+    # net worth = 1500 - 250 = 1250
+    assert "1,250.00" in out or "1250.00" in out
+    assert "2/3" in out  # 2 of 3 known accounts have a starting point
+    assert "untracked" in out

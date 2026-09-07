@@ -1138,5 +1138,43 @@ def run_eval(fixture: Path = typer.Option(None, help="Labeled fixture CSV")):
     evaluate(fixture)
 
 
+# ------------------------------------------------------------ balance sheet
+@app.command("balance-sheet")
+def balance_sheet():
+    """Net worth: sum of Asset account balances minus Liability account
+    balances, computed from each account's opening balance plus every
+    transaction since. Cost-basis only -- an account with no opening
+    balance set is excluded and called out, never silently treated as
+    zero."""
+    from .balance_sheet import compute_account_balance
+    store = _store()
+    accounts = [r["account"] for r in store.db.execute(
+        "SELECT DISTINCT account FROM transactions").fetchall()]
+    account_types = store.get_config("account_types", {}) or {}
+
+    table = Table(title="Balance sheet")
+    table.add_column("Account")
+    table.add_column("Type")
+    table.add_column("Balance", justify="right")
+    total_assets = total_liabilities = 0.0
+    counted = 0
+    for account in sorted(accounts):
+        acct_type = account_types.get(account, "Assets")
+        balance = compute_account_balance(store, account)
+        if balance is None:
+            table.add_row(account, acct_type, "[dim]no opening balance[/dim]")
+            continue
+        counted += 1
+        table.add_row(account, acct_type, f"{balance:,.2f}")
+        if acct_type == "Liabilities":
+            total_liabilities += balance
+        else:
+            total_assets += balance
+    console.print(table)
+    console.print(f"\n[bold]Net worth: {total_assets - total_liabilities:,.2f}"
+                  f"[/bold]  [dim]({counted}/{len(accounts)} accounts have a "
+                  "starting point)[/dim]")
+
+
 if __name__ == "__main__":
     app()
