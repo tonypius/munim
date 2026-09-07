@@ -299,3 +299,43 @@ def test_transfers_review_empty_queue_message(tmp_path, monkeypatch):
     result = runner.invoke(app, ["transfers", "review"])
     assert result.exit_code == 0
     assert "empty" in result.output.lower() or "nothing" in result.output.lower()
+
+
+def test_transfers_dismiss_marks_dismissed(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    store.upsert_transactions([debit])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "dismiss", "d1"])
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path)
+    assert reloaded.is_dismissed("d1")
+
+
+def test_transfers_dismiss_rejects_already_linked_transaction(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    store.link_transfer("d1", "c1")
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "dismiss", "d1"])
+    assert result.exit_code != 0
+    reloaded = Store(home=tmp_path)
+    assert not reloaded.is_dismissed("d1")
+
+
+def test_transfers_dismiss_rejects_unknown_id(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "dismiss", "nonexistent"])
+    assert result.exit_code != 0

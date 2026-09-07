@@ -819,6 +819,23 @@ def transfers_review():
             console.print("        [red]Skipped (unrecognized input).[/red]\n")
 
 
+@transfers_app.command("dismiss")
+def transfers_dismiss(txn_id: str):
+    """Mark a transfer as intentionally unlinked -- it will never have a
+    counterpart in munim (e.g. money sent to an untracked account)."""
+    store = _store()
+    t = store.get_transaction(txn_id)
+    if t is None:
+        console.print(f"[red]No transaction with id {txn_id}.[/red]")
+        raise typer.Exit(1)
+    if store.is_linked(txn_id):
+        console.print(f"[red]{txn_id} is already linked — nothing to "
+                      "dismiss.[/red]")
+        raise typer.Exit(1)
+    store.dismiss_transfer(txn_id)
+    console.print(f"[green]{txn_id} dismissed.[/green]")
+
+
 # ------------------------------------------------------------------- export
 @app.command()
 def export(
