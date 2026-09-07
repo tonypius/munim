@@ -83,6 +83,8 @@ def import_csv(
                       "and run munim doctor.[/red]")
     stats = pipeline.run(txns)
     inserted, skipped = store.upsert_transactions(txns)
+    from .structural.transfer_matching import apply_auto_links
+    n_linked = apply_auto_links(store)
 
     resolved = stats.total - stats.by_stage.get("none", 0)
     pct = 100 * resolved / stats.total if stats.total else 0
@@ -94,6 +96,8 @@ def import_csv(
         console.print(f"[yellow]{unresolved} need you[/yellow] → run: "
                       f"[bold]munim review[/bold]")
     _print_stage_table(stats.by_stage)
+    if n_linked:
+        console.print(f"[dim]{n_linked} transfer pair(s) auto-linked.[/dim]")
 
 
 def _load_or_build_profile(store: Store, file: Path, name: str,
@@ -760,6 +764,22 @@ def accounts_type(account: str, root: str):
     types[account] = root
     store.set_config("account_types", types)
     console.print(f"[green]{account} → {root}[/green]")
+
+
+# ---------------------------------------------------------------- transfers
+transfers_app = typer.Typer(help="Link transfer pairs across accounts.",
+                            no_args_is_help=True)
+app.add_typer(transfers_app, name="transfers")
+
+
+@transfers_app.command("link")
+def transfers_link():
+    """Re-run auto-linking over every currently-unlinked transfer pair,
+    without a fresh import."""
+    from .structural.transfer_matching import apply_auto_links
+    store = _store()
+    n = apply_auto_links(store)
+    console.print(f"[green]{n} transfer pair(s) linked.[/green]")
 
 
 # ------------------------------------------------------------------- export

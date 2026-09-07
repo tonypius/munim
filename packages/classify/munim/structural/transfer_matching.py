@@ -55,3 +55,12 @@ def find_transfer_candidates(store) -> dict:
             ambiguous.append((d.id, matches))
 
     return {"auto": auto, "ambiguous": ambiguous}
+
+
+def apply_auto_links(store) -> int:
+    """Find and record every exact, unambiguous transfer pair. Returns
+    the number of pairs linked."""
+    candidates = find_transfer_candidates(store)
+    for debit_id, credit_id in candidates["auto"]:
+        store.link_transfer(debit_id, credit_id, confidence="auto")
+    return len(candidates["auto"])

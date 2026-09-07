@@ -186,3 +186,70 @@ def test_find_transfer_candidates_credit_claimed_by_two_debits_is_ambiguous(tmp_
     result = find_transfer_candidates(store)
     assert result["auto"] == []
     assert {d for d, _ in result["ambiguous"]} == {"d1", "d2"}
+
+
+def test_apply_auto_links_links_exact_matches_only(tmp_path):
+    from munim.structural.transfer_matching import apply_auto_links
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    ambiguous_debit = _transfer("d2", "2026-06-01", 7000, Direction.DEBIT, "bank")
+    ambiguous_credit1 = _transfer("c2", "2026-06-02", 7000, Direction.CREDIT, "card")
+    ambiguous_credit2 = _transfer("c3", "2026-06-02", 7000, Direction.CREDIT, "wallet")
+    store.upsert_transactions([debit, credit, ambiguous_debit,
+                               ambiguous_credit1, ambiguous_credit2])
+    n = apply_auto_links(store)
+    assert n == 1
+    assert store.linked_counterpart("d1") == "c1"
+    assert not store.is_linked("d2")
+
+
+def test_import_csv_auto_links_transfers(tmp_path, monkeypatch):
+    """End-to-end: importing a CSV that structurally detects a transfer
+    which exactly matches an existing unlinked transfer must auto-link
+    them, without a separate `transfers link` call. Pre-seeds a saved
+    CSV profile (matching _load_or_build_profile's "name in profiles"
+    branch) so the import runs straight through without the interactive
+    column-mapping wizard."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("csv_profiles", {
+        "test": {"date_col": "Date", "description_col": "Narration",
+                 "amount_col": "Amount", "debit_col": "", "credit_col": "",
+                 "currency": "INR", "date_format": ""},
+    })
+    existing = _transfer("c1", "2026-06-02", 45230, Direction.CREDIT, "tony-hdfc-regalia-cc")
+    store.upsert_transactions([existing])
+
+    csv_path = tmp_path / "bank.csv"
+    csv_path.write_text(
+        "Date,Narration,Amount\n"
+        "01/06/2026,CREDIT CARD PAYMENT BILLDESK HDFC CARD,-45230.00\n",
+        encoding="utf-8")
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["import", str(csv_path), "--profile", "test",
+                                 "--account", "tony-hdfc-savings"])
+    assert result.exit_code == 0, result.output
+
+    reloaded = Store(home=tmp_path)
+    new_debit_id = [t.id for t in reloaded.all_transactions() if t.id != "c1"][0]
+    assert reloaded.linked_counterpart(new_debit_id) == "c1"
+
+
+def test_transfers_link_command_reports_count(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "link"])
+    assert result.exit_code == 0, result.output
+    assert "1" in result.output
+    reloaded = Store(home=tmp_path)
+    assert reloaded.linked_counterpart("d1") == "c1"
