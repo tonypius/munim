@@ -149,7 +149,7 @@ A transaction can also carry any number of manually-assigned tags — Business, 
 
 ## Transfer linking
 
-Transfers between your own accounts are detected structurally, but each leg still arrives as an independent transaction. `munim import` also runs a cross-import matching pass that pairs up debit/credit legs of the same transfer: unambiguous pairs are auto-linked, ambiguous ones (e.g. a shared amount claimed by multiple candidates) queue up for a quick manual call, and a permanently one-sided transaction can be dismissed from future matching. Once linked, ledger export posts the transfer's counter-leg against the real counterparty account instead of a generic clearing bucket. See `munim transfers --help`.
+Transfers between your own accounts are detected structurally, but each leg still arrives as an independent transaction. `munim import` also runs a cross-import matching pass that pairs up debit/credit legs of the same transfer: unambiguous pairs are auto-linked, ambiguous ones (e.g. a shared amount claimed by multiple candidates) queue up for a quick manual call, and a permanently one-sided transaction can be dismissed from future matching. Once linked, ledger export posts the transfer's counter-leg against the real counterparty account instead of a generic clearing bucket. See `munim transfers --help`. `munim web`'s Transfers tab does the same review/dismiss/relink actions from the browser.
 
 ## Balance sheet / net worth
 
