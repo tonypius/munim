@@ -813,6 +813,10 @@ def transfers_review():
             continue
         if choice.isdigit() and 1 <= int(choice) <= len(candidate_ids):
             chosen = candidate_ids[int(choice) - 1]
+            if store.is_linked(debit_id) or store.is_linked(chosen):
+                console.print("        [red]Already linked elsewhere — "
+                              "skipped.[/red]\n")
+                continue
             store.link_transfer(debit_id, chosen, confidence="confirmed")
             console.print("        [green]Linked.[/green]\n")
         else:

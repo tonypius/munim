@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS transfer_links (
     confidence TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_links_a ON transfer_links(txn_id_a);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_links_b ON transfer_links(txn_id_b);
 CREATE TABLE IF NOT EXISTS transfer_dismissals (
     txn_id TEXT PRIMARY KEY,
     dismissed_at TEXT DEFAULT (datetime('now'))

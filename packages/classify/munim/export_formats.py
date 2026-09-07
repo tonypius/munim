@@ -47,6 +47,9 @@ def to_ledger(txns: list[Transaction], tree: dict | None = None,
 
     out = []
     for t in sorted(txns, key=lambda x: x.date):
+        if (t.is_transfer and t.direction == Direction.CREDIT
+                and links.get(t.id) in by_id):
+            continue  # the linked debit leg's own entry already covers this pair
         payee = t.merchant_norm or t.payee_handle or t.description_raw[:48]
         path = resolve(tree, t.category)
         if t.subcategory:

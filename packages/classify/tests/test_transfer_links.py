@@ -392,3 +392,44 @@ def test_ledger_export_links_parameter_is_optional(tmp_path):
     tree = default_tree(["Transfers"])
     out = to_ledger([debit], tree=tree, account_types={"tony-hdfc-savings": "Assets"})
     assert "Equity:Transfers" in out
+
+
+def test_ledger_export_linked_transfer_emits_one_entry_not_two(tmp_path):
+    """A linked transfer pair must produce exactly ONE ledger transaction
+    covering both real accounts -- not one entry per leg, which would
+    double-count the money movement now that both legs post against real
+    accounts instead of a shared, netting-to-zero Equity:Transfers bucket."""
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "tony-hdfc-savings")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "tony-hdfc-regalia-cc")
+    tree = default_tree(["Transfers"])
+    account_types = {"tony-hdfc-savings": "Assets", "tony-hdfc-regalia-cc": "Liabilities"}
+    links = {"d1": "c1", "c1": "d1"}
+    out = to_ledger([debit, credit], tree=tree, account_types=account_types, links=links)
+    entries = [e for e in out.strip().split("\n\n") if e.strip()]
+    assert len(entries) == 1
+    assert out.count("Liabilities:tony-hdfc-regalia-cc") == 1
+    assert out.count("Assets:tony-hdfc-savings") == 1
+
+
+def test_transfers_review_rejects_double_linking_same_credit(tmp_path, monkeypatch):
+    """Two debits that both show the same credit as their sole candidate
+    (both flagged ambiguous, per the earlier shared-credit fix) must not
+    both be linkable to that credit in one review session -- the second
+    attempt must be refused, not silently create a conflicting link."""
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit1 = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    debit2 = _transfer("d2", "2026-06-01", 5000, Direction.DEBIT, "bank2")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit1, debit2, credit])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "review"], input="1\n1\n")
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path)
+    assert reloaded.is_linked("c1")
+    linked_debits = [tid for tid in ("d1", "d2") if reloaded.is_linked(tid)]
+    assert len(linked_debits) == 1
