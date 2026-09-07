@@ -782,6 +782,43 @@ def transfers_link():
     console.print(f"[green]{n} transfer pair(s) linked.[/green]")
 
 
+@transfers_app.command("review")
+def transfers_review():
+    """Resolve ambiguous transfer pairs one at a time -- a debit with
+    multiple candidate credits, pick the right one."""
+    from .structural.transfer_matching import find_transfer_candidates
+    store = _store()
+    ambiguous = find_transfer_candidates(store)["ambiguous"]
+    if not ambiguous:
+        console.print("[green]Nothing ambiguous — the transfer queue is "
+                      "empty.[/green]")
+        return
+
+    txn_by_id = {t.id: t for t in store.all_transactions()}
+    console.print(f"[bold]{len(ambiguous)} ambiguous transfer(s).[/bold] "
+                  "number=pick a match · s=skip · q=quit\n")
+    for debit_id, candidate_ids in ambiguous:
+        d = txn_by_id[debit_id]
+        label = d.merchant_norm or d.payee_handle or d.description_raw[:40]
+        console.print(f"[bold]{label}[/bold]  {d.currency} {d.amount:,.2f}  "
+                      f"{d.date}  ({d.account})")
+        for i, cid in enumerate(candidate_ids, 1):
+            c = txn_by_id[cid]
+            console.print(f"  [{i}] {c.account}  {c.date}  "
+                          f"{c.currency} {c.amount:,.2f}")
+        choice = typer.prompt("      →", default="", show_default=False).strip().lower()
+        if choice == "q":
+            break
+        if choice == "s" or not choice:
+            continue
+        if choice.isdigit() and 1 <= int(choice) <= len(candidate_ids):
+            chosen = candidate_ids[int(choice) - 1]
+            store.link_transfer(debit_id, chosen, confidence="confirmed")
+            console.print("        [green]Linked.[/green]\n")
+        else:
+            console.print("        [red]Skipped (unrecognized input).[/red]\n")
+
+
 # ------------------------------------------------------------------- export
 @app.command()
 def export(

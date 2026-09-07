@@ -253,3 +253,49 @@ def test_transfers_link_command_reports_count(tmp_path, monkeypatch):
     assert "1" in result.output
     reloaded = Store(home=tmp_path)
     assert reloaded.linked_counterpart("d1") == "c1"
+
+
+def test_transfers_review_links_the_chosen_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 7000, Direction.DEBIT, "bank")
+    credit1 = _transfer("c1", "2026-06-02", 7000, Direction.CREDIT, "card")
+    credit2 = _transfer("c2", "2026-06-02", 7000, Direction.CREDIT, "wallet")
+    store.upsert_transactions([debit, credit1, credit2])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    # "2" selects the second listed candidate
+    result = runner.invoke(app, ["transfers", "review"], input="2\n")
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path)
+    assert reloaded.is_linked("d1")
+    rows = reloaded.all_transfer_links()
+    assert rows[0]["confidence"] == "confirmed"
+
+
+def test_transfers_review_skip_leaves_unlinked(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 7000, Direction.DEBIT, "bank")
+    credit1 = _transfer("c1", "2026-06-02", 7000, Direction.CREDIT, "card")
+    credit2 = _transfer("c2", "2026-06-02", 7000, Direction.CREDIT, "wallet")
+    store.upsert_transactions([debit, credit1, credit2])
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "review"], input="s\n")
+    assert result.exit_code == 0, result.output
+    reloaded = Store(home=tmp_path)
+    assert not reloaded.is_linked("d1")
+
+
+def test_transfers_review_empty_queue_message(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "review"])
+    assert result.exit_code == 0
+    assert "empty" in result.output.lower() or "nothing" in result.output.lower()
