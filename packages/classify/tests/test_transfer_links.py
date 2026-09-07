@@ -2,10 +2,12 @@
 transfer_dismissals tables, and Store's core methods over them."""
 import sys
 from pathlib import Path
+from datetime import timedelta
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from munim.store import Store
+from munim.schema import Transaction, Direction
 
 
 def test_fresh_store_has_transfer_tables(tmp_path):
@@ -77,3 +79,95 @@ def test_dismiss_transfer_is_idempotent(tmp_path):
     store.dismiss_transfer("txn-x")
     store.dismiss_transfer("txn-x")
     assert len(store.dismissed_ids()) == 1
+
+
+def _transfer(id_, date, amount, direction, account):
+    return Transaction(id=id_, date=date, amount=amount, direction=direction,
+                       description_raw=f"TRANSFER {id_}", account=account,
+                       is_transfer=True, category="Transfers")
+
+
+def test_find_transfer_candidates_exact_single_match_is_auto(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == [("d1", "c1")]
+    assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_multiple_matches_is_ambiguous(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit1 = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    credit2 = _transfer("c2", "2026-06-03", 5000, Direction.CREDIT, "wallet")
+    store.upsert_transactions([debit, credit1, credit2])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert len(result["ambiguous"]) == 1
+    assert result["ambiguous"][0][0] == "d1"
+    assert set(result["ambiguous"][0][1]) == {"c1", "c2"}
+
+
+def test_find_transfer_candidates_same_account_never_matches(tmp_path):
+    """A debit and credit in the SAME account can't be a transfer between
+    two of the user's accounts by definition."""
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "bank")
+    store.upsert_transactions([debit, credit])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_outside_window_does_not_match(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-20", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_excludes_already_linked(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    store.link_transfer("d1", "c1")
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_excludes_dismissed(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    store.dismiss_transfer("d1")
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_ignores_non_transfers(tmp_path):
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit = Transaction(id="d1", date="2026-06-01", amount=5000,
+                        direction=Direction.DEBIT, description_raw="GROCERY",
+                        account="bank", is_transfer=False, category="Groceries")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit, credit])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert result["ambiguous"] == []
