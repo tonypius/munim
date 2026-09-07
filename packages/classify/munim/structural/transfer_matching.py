@@ -15,7 +15,13 @@ def find_transfer_candidates(store) -> dict:
     """Read-only: compute which unlinked, undismissed is_transfer
     transactions could pair up. Returns {"auto": [(debit_id, credit_id)],
     "ambiguous": [(debit_id, [credit_id, ...])]} -- zero-candidate
-    transactions are simply absent from both lists."""
+    transactions are simply absent from both lists.
+
+    A debit's match is "auto" only if it has exactly one candidate credit
+    AND that credit is not also a candidate for any other debit -- a
+    credit claimed by two different debits is exactly the case the system
+    cannot tell apart, so both pairings go to "ambiguous" instead.
+    """
     linked = set(store.transfer_link_map().keys())
     dismissed = store.dismissed_ids()
 
@@ -26,16 +32,26 @@ def find_transfer_candidates(store) -> dict:
     debits = [t for t in txns if t.direction == Direction.DEBIT]
     credits = [t for t in txns if t.direction == Direction.CREDIT]
 
+    def candidates_for(d):
+        return [c.id for c in credits
+                if c.account != d.account
+                and abs(c.amount - d.amount) < 0.01
+                and abs((c.date - d.date).days) <= MIRROR_WINDOW_DAYS]
+
+    debit_matches = {d.id: candidates_for(d) for d in debits}
+
+    credit_claim_count: dict[str, int] = {}
+    for matches in debit_matches.values():
+        for cid in matches:
+            credit_claim_count[cid] = credit_claim_count.get(cid, 0) + 1
+
     auto = []
     ambiguous = []
     for d in debits:
-        matches = [c.id for c in credits
-                  if c.account != d.account
-                  and abs(c.amount - d.amount) < 0.01
-                  and abs((c.date - d.date).days) <= MIRROR_WINDOW_DAYS]
-        if len(matches) == 1:
+        matches = debit_matches[d.id]
+        if len(matches) == 1 and credit_claim_count[matches[0]] == 1:
             auto.append((d.id, matches[0]))
-        elif len(matches) > 1:
+        elif matches:
             ambiguous.append((d.id, matches))
 
     return {"auto": auto, "ambiguous": ambiguous}

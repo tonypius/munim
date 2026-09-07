@@ -171,3 +171,18 @@ def test_find_transfer_candidates_ignores_non_transfers(tmp_path):
     result = find_transfer_candidates(store)
     assert result["auto"] == []
     assert result["ambiguous"] == []
+
+
+def test_find_transfer_candidates_credit_claimed_by_two_debits_is_ambiguous(tmp_path):
+    """A credit that looks like the sole candidate for two different debits
+    can't be safely auto-linked to either -- the system genuinely cannot
+    tell which debit it really pairs with."""
+    from munim.structural.transfer_matching import find_transfer_candidates
+    store = Store(home=tmp_path)
+    debit1 = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    debit2 = _transfer("d2", "2026-06-01", 5000, Direction.DEBIT, "bank2")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    store.upsert_transactions([debit1, debit2, credit])
+    result = find_transfer_candidates(store)
+    assert result["auto"] == []
+    assert {d for d, _ in result["ambiguous"]} == {"d1", "d2"}
