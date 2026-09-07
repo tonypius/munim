@@ -836,6 +836,37 @@ def transfers_dismiss(txn_id: str):
     console.print(f"[green]{txn_id} dismissed.[/green]")
 
 
+@transfers_app.command("status")
+def transfers_status():
+    """Coverage report: how many transfer pairs are linked, still
+    pending a counterpart, or dismissed."""
+    store = _store()
+    txns = {t.id: t for t in store.all_transactions() if t.is_transfer}
+    linked_ids = set(store.transfer_link_map().keys())
+    dismissed_ids = store.dismissed_ids()
+    links = store.all_transfer_links()
+    n_auto = sum(1 for l in links if l["confidence"] == "auto")
+    n_confirmed = sum(1 for l in links if l["confidence"] == "confirmed")
+    pending = [t for tid, t in txns.items()
+              if tid not in linked_ids and tid not in dismissed_ids]
+
+    console.print(f"[bold]Transfer link coverage[/bold]")
+    console.print(f"  Linked: {len(links)} pairs "
+                  f"({n_auto} auto, {n_confirmed} confirmed)")
+    console.print(f"  Dismissed: {len(dismissed_ids)}")
+    console.print(f"  Still pending a counterpart: {len(pending)}")
+    if pending:
+        by_account: dict[str, int] = {}
+        for t in pending:
+            by_account[t.account] = by_account.get(t.account, 0) + 1
+        table = Table(title="Pending, by account")
+        table.add_column("Account")
+        table.add_column("Count", justify="right")
+        for account, n in sorted(by_account.items(), key=lambda x: -x[1]):
+            table.add_row(account, str(n))
+        console.print(table)
+
+
 # ------------------------------------------------------------------- export
 @app.command()
 def export(

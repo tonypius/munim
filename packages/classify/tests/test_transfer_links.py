@@ -339,3 +339,22 @@ def test_transfers_dismiss_rejects_unknown_id(tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(app, ["transfers", "dismiss", "nonexistent"])
     assert result.exit_code != 0
+
+
+def test_transfers_status_reports_all_buckets(tmp_path, monkeypatch):
+    monkeypatch.setattr("munim.cli._store", lambda: Store(home=tmp_path))
+    store = Store(home=tmp_path)
+    linked_a = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "bank")
+    linked_b = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "card")
+    pending = _transfer("d2", "2026-06-05", 3000, Direction.DEBIT, "bank")
+    dismissed = _transfer("d3", "2026-06-06", 2000, Direction.DEBIT, "wallet")
+    store.upsert_transactions([linked_a, linked_b, pending, dismissed])
+    store.link_transfer("d1", "c1", confidence="auto")
+    store.dismiss_transfer("d3")
+    from typer.testing import CliRunner
+    from munim.cli import app
+    runner = CliRunner()
+    result = runner.invoke(app, ["transfers", "status"])
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "bank" in out  # the pending one's account surfaced
