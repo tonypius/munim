@@ -358,3 +358,37 @@ def test_transfers_status_reports_all_buckets(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     out = result.output
     assert "bank" in out  # the pending one's account surfaced
+
+
+def test_ledger_export_uses_real_account_for_linked_transfer(tmp_path):
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "tony-hdfc-savings")
+    credit = _transfer("c1", "2026-06-02", 5000, Direction.CREDIT, "tony-hdfc-regalia-cc")
+    tree = default_tree(["Transfers"])
+    account_types = {"tony-hdfc-savings": "Assets", "tony-hdfc-regalia-cc": "Liabilities"}
+    links = {"d1": "c1", "c1": "d1"}
+    out = to_ledger([debit, credit], tree=tree, account_types=account_types, links=links)
+    assert "Equity:Transfers" not in out
+    assert "Liabilities:tony-hdfc-regalia-cc" in out
+    assert "Assets:tony-hdfc-savings" in out
+
+
+def test_ledger_export_falls_back_to_equity_transfers_when_unlinked(tmp_path):
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "tony-hdfc-savings")
+    tree = default_tree(["Transfers"])
+    out = to_ledger([debit], tree=tree, account_types={"tony-hdfc-savings": "Assets"})
+    assert "Equity:Transfers" in out
+
+
+def test_ledger_export_links_parameter_is_optional(tmp_path):
+    """Existing callers that never pass `links` must see identical
+    output to before this change -- links defaults to {}."""
+    from munim.export_formats import to_ledger
+    from munim.tree import default_tree
+    debit = _transfer("d1", "2026-06-01", 5000, Direction.DEBIT, "tony-hdfc-savings")
+    tree = default_tree(["Transfers"])
+    out = to_ledger([debit], tree=tree, account_types={"tony-hdfc-savings": "Assets"})
+    assert "Equity:Transfers" in out

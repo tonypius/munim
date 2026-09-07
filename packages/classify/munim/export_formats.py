@@ -24,18 +24,23 @@ def to_jsonl(txns: list[Transaction]) -> str:
 
 
 def to_ledger(txns: list[Transaction], tree: dict | None = None,
-              account_types: dict | None = None) -> str:
+              account_types: dict | None = None,
+              links: dict | None = None) -> str:
     """Plain-text accounting format (ledger/hledger; beancount-convertible).
 
     Leaves resolve through the category tree (docs: categories are flat in
     the engine; the tree is a display mapping). Accounts post under Assets
-    or Liabilities per `munim accounts type`. Transfers use the Transfers
-    leaf's mapped path (default Equity:Transfers) as the counter-leg because
-    Munim doesn't track the counterparty account.
+    or Liabilities per `munim accounts type`. A linked transfer (see
+    `Store.transfer_link_map`) posts its counter-leg against the real
+    counterparty account; an unlinked one falls back to the Transfers
+    leaf's mapped path (default Equity:Transfers) as a generic clearing
+    bucket, exactly as before this parameter existed.
     """
     from .tree import resolve, default_tree
     tree = tree or default_tree([])
     account_types = account_types or {}
+    links = links or {}
+    by_id = {t.id: t for t in txns}
 
     def acct_path(t: Transaction) -> str:
         return f"{account_types.get(t.account, 'Assets')}:{t.account}"
@@ -51,7 +56,10 @@ def to_ledger(txns: list[Transaction], tree: dict | None = None,
         note = f"    ; stage: {t.stage.value}, status: {t.status.value}"
         amt = f"{t.amount:.2f} {t.currency}"
         if t.is_transfer:
-            counter = resolve(tree, "Transfers").replace(" ", "-")
+            counterpart_id = links.get(t.id)
+            counterpart = by_id.get(counterpart_id) if counterpart_id else None
+            counter = (acct_path(counterpart) if counterpart
+                      else resolve(tree, "Transfers").replace(" ", "-"))
             legs = [f"    {counter}    {amt}",
                     f"    {acct_path(t)}"]
             if t.direction == Direction.CREDIT:

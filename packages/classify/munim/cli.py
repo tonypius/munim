@@ -894,6 +894,7 @@ def export(
         out.write_text(ef.to_ledger(
             txns, tree=get_tree(store),
             account_types=store.get_config("account_types", {}) or {},
+            links=store.transfer_link_map(),
         ), encoding="utf-8")
     elif fmt == "firefly":
         out = out or Path("munim-firefly.csv")
