@@ -404,17 +404,24 @@ class Handler(BaseHTTPRequestHandler):
     def _categories(self):
         cats = self.store.get_config("categories", [])
         usage: dict[str, dict] = defaultdict(lambda: {"n": 0, "total": 0.0})
+        subcat_usage: dict[str, dict] = defaultdict(dict)
         for t in self.store.all_transactions():
             if t.category and t.direction.value == "debit" and not t.is_transfer:
                 usage[t.category]["n"] += 1
                 usage[t.category]["total"] += t.amount
+                if t.subcategory:
+                    entry = subcat_usage[t.category].setdefault(
+                        t.subcategory, {"n": 0, "total": 0.0})
+                    entry["n"] += 1
+                    entry["total"] += t.amount
         from ..tree import get_tree, resolve
         tree = get_tree(self.store)
         return {"categories": cats,
                 "paths": {c: resolve(tree, c) for c in cats},
                 "usage": {c: usage.get(c, {"n": 0, "total": 0.0})
                           for c in set(cats) | set(usage)},
-                "subcategories": self.store.get_config("subcategories", {}) or {}}
+                "subcategories": self.store.get_config("subcategories", {}) or {},
+                "subcat_usage": dict(subcat_usage)}
 
     def _rules(self):
         learned = self.store.db.execute(

@@ -383,6 +383,40 @@ def test_api_categories_includes_subcategories_config(tmp_path):
         srv.shutdown()
 
 
+def test_api_categories_includes_subcategory_usage_stats(tmp_path):
+    """Each category's subcategory breakdown needs its own entry count and
+    total, mirroring the top-level category usage shape -- otherwise the
+    web UI can't show a per-subcategory bar the same way it shows one per
+    category. Unrefined debits (category set, subcategory blank) must be
+    excluded from subcat_usage entirely -- they have no subcategory to
+    attribute to."""
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Groceries"])
+    store.set_config("subcategories", {"Groceries": ["Alcohol", "Snacks"]})
+    store.upsert_transactions([
+        Transaction(date="2026-06-01", amount=300, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP", category="Groceries",
+                    subcategory="Alcohol"),
+        Transaction(date="2026-06-02", amount=200, direction=Direction.DEBIT,
+                    description_raw="SHETTY BEER SHOP 2", category="Groceries",
+                    subcategory="Alcohol"),
+        Transaction(date="2026-06-03", amount=100, direction=Direction.DEBIT,
+                    description_raw="LAYS CHIPS", category="Groceries",
+                    subcategory="Snacks"),
+        Transaction(date="2026-06-04", amount=50, direction=Direction.DEBIT,
+                    description_raw="UNSORTED GROCERY RUN", category="Groceries"),
+    ])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/categories", timeout=3).read())
+        assert d["subcat_usage"]["Groceries"]["Alcohol"] == {"n": 2, "total": 500.0}
+        assert d["subcat_usage"]["Groceries"]["Snacks"] == {"n": 1, "total": 100.0}
+        assert "" not in d["subcat_usage"]["Groceries"]
+    finally:
+        srv.shutdown()
+
+
 def test_api_rules_includes_subcategory_field(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("region", "in")

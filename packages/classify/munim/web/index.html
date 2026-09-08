@@ -429,17 +429,31 @@ $("#txnBulkRemove")?.addEventListener("click",()=>bulkTag("remove"));
 /* categories */
 async function categories(){
   const d=await api("/api/categories");CATS=d.categories;SUBCATS=d.subcategories||{};
+  const subUsage=d.subcat_usage||{};
   const rows=Object.entries(d.usage).sort((a,b)=>b[1].total-a[1].total);
   const max=Math.max(1,...rows.map(([,u])=>u.total));
-  $("#catBody").innerHTML=`<table><thead><tr>
-    <th>Head</th><th>Ledger path</th><th class="num">Entries</th><th class="num">Total</th><th style="width:24%"></th>
-  </tr></thead><tbody>`+rows.map(([c,u])=>`<tr>
-    <td>${esc(c)}${d.categories.includes(c)?"":' <span class="tag">not in taxonomy</span>'}</td>
-    <td class="merchant" style="font-size:12px;color:var(--ink-soft)">${esc(d.paths?.[c]||"")}</td>
+  const subRow=(name,u,catTotal)=>`<tr>
+    <td class="subcat" style="padding-left:24px">↳ ${esc(name)}</td><td></td>
     <td class="num">${u.n}</td>
     <td class="num">${fmt(u.total,CUR)}</td>
-    <td><div class="bar"><i style="width:${(100*u.total/max).toFixed(1)}%"></i></div></td>
-  </tr>`).join("")+`</tbody></table>`;
+    <td><div class="bar"><i style="width:${catTotal?(100*u.total/catTotal).toFixed(1):0}%"></i></div></td>
+  </tr>`;
+  $("#catBody").innerHTML=`<table><thead><tr>
+    <th>Head</th><th>Ledger path</th><th class="num">Entries</th><th class="num">Total</th><th style="width:24%"></th>
+  </tr></thead><tbody>`+rows.map(([c,u])=>{
+    const subEntries=Object.entries(subUsage[c]||{}).sort((a,b)=>b[1].total-a[1].total);
+    const subN=subEntries.reduce((s,[,v])=>s+v.n,0);
+    const subTotal=subEntries.reduce((s,[,v])=>s+v.total,0);
+    const unrefined=(SUBCATS[c]||[]).length&&u.n>subN
+      ?subRow("(unrefined)",{n:u.n-subN,total:u.total-subTotal},u.total):"";
+    return `<tr>
+      <td>${esc(c)}${d.categories.includes(c)?"":' <span class="tag">not in taxonomy</span>'}</td>
+      <td class="merchant" style="font-size:12px;color:var(--ink-soft)">${esc(d.paths?.[c]||"")}</td>
+      <td class="num">${u.n}</td>
+      <td class="num">${fmt(u.total,CUR)}</td>
+      <td><div class="bar"><i style="width:${(100*u.total/max).toFixed(1)}%"></i></div></td>
+    </tr>`+subEntries.map(([name,su])=>subRow(name,su,u.total)).join("")+unrefined;
+  }).join("")+`</tbody></table>`;
 }
 
 /* rules */
