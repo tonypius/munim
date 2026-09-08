@@ -15,6 +15,7 @@ from rich.markup import escape
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
 from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc_credit_card_v2
+from . import sbi_credit_card
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -46,6 +47,13 @@ BANK_NORMALIZERS = {
     "hdfc": _normalize_hdfc_credit_card,
     "hdfc-bank": hdfc_bank_account.normalize_hdfc_bank_account_rows,
 }
+
+# --bank sbi doesn't go through BANK_NORMALIZERS at all — see the early
+# special case in pdf_extract_cmd for why (extract_rows()/
+# filter_transaction_rows() are actively wrong for this bank's layout).
+# Still a recognized --bank value, so it's included here for validation
+# and help text alongside the banks that do use BANK_NORMALIZERS.
+PDF_BANKS = (*BANK_NORMALIZERS, "sbi")
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
 # this CLI must never render a locals table, which would print the Gmail
@@ -240,8 +248,8 @@ def pdf_extract_cmd(
     bank: str = typer.Option(
         None, "--bank",
         help=f"Apply a bank-specific amount normalization after the "
-             f"generic filter (ignored with --raw). Available: "
-             f"{', '.join(BANK_NORMALIZERS)}."),
+             f"generic filter (ignored with --raw, except --bank sbi — "
+             f"see below). Available: {', '.join(PDF_BANKS)}."),
 ):
     """Decrypt a password-protected statement PDF and extract its rows to a
     CSV file. The password is read from MUNIM_PDF_PASSWORD if set,
@@ -259,13 +267,23 @@ def pdf_extract_cmd(
     direction layout) into munim's expected signed-amount format.
     --bank hdfc-bank does the same for HDFC savings/current account
     statements, exploding each page's merged multi-transaction row back
-    into one row per transaction. Run `munim import` on the output next
-    to map columns and classify, same as any bank CSV export.
+    into one row per transaction. --bank sbi is different from the other
+    two: SBI's "Transaction History" export never forms a ruled table at
+    all except for its own column-header row, which makes the generic
+    extraction above actively wrong (it finds that one header "table" and
+    returns only it, skipping every real transaction) — so --bank sbi
+    reads each word's own position on the page directly instead of going
+    through the generic row/table path this command otherwise always
+    uses (necessary because pdfplumber's text-stream order scrambles a
+    wrapped long merchant name relative to its own date/type/amount —
+    see sbi_credit_card.py for the real example), and --raw has no effect
+    with it. Run `munim import` on the output next to map columns and
+    classify, same as any bank CSV export.
     """
-    if bank is not None and bank not in BANK_NORMALIZERS:
+    if bank is not None and bank not in PDF_BANKS:
         console.print(
             f"[red]Unknown --bank '{escape(bank)}'. Available: "
-            f"{', '.join(BANK_NORMALIZERS)}.[/red]")
+            f"{', '.join(PDF_BANKS)}.[/red]")
         raise typer.Exit(1)
 
     password = os.environ.get("MUNIM_PDF_PASSWORD") or getpass.getpass(
@@ -279,6 +297,37 @@ def pdf_extract_cmd(
     # try — anything that can fail while `password` is still a live local
     # belongs here.
     try:
+        if bank == "sbi":
+            # Bypasses extract_rows()/filter_transaction_rows() entirely —
+            # see this command's docstring for why those are actively
+            # wrong for this bank (pdfplumber finds only a small header
+            # "table" and returns just that, never the real transactions).
+            if raw:
+                console.print(
+                    "[yellow]--raw has no effect for --bank sbi: this "
+                    "bank's transactions are read from each word's own "
+                    "position on the page, not through the generic "
+                    "row/table path --raw controls.[/yellow]")
+            with open_pdf(file, password) as pdf:
+                final_rows = sbi_credit_card.parse_transactions(pdf.pages)
+            if not final_rows:
+                console.print(
+                    "[yellow]No transactions found — this may not be an "
+                    "SBI 'Transaction History' export, or its format has "
+                    "changed.[/yellow]")
+                raise typer.Exit(1)
+            final_rows = [sbi_credit_card.HEADER_ROW, *final_rows]
+            out_path = out or file.with_suffix(".csv")
+            if out_path.exists():
+                console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
+            write_csv(final_rows, out_path)
+            console.print(
+                f"[green]Extracted {len(final_rows) - 1} transaction row(s) "
+                f"to {escape(str(out_path))}[/green]", soft_wrap=True)
+            console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
+                          "to map columns and classify.", soft_wrap=True)
+            return
+
         with open_pdf(file, password) as pdf:
             rows = extract_rows(pdf)
             # Only hdfc-bank statements are known to carry this, and only

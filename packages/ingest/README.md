@@ -46,6 +46,13 @@ classify, same as any bank CSV export. Re-running the command overwrites
 an existing output file at the same path (with a visible warning first),
 so save any manual edits elsewhere before re-extracting.
 
+Pass `--bank sbi` for an SBI credit card's "Transaction History" export
+(downloaded from netbanking or emailed as a statement). This bank's real
+transactions never form a ruled table at all — only its own column-header
+row does — so `--bank sbi` reads each word's own position on the page
+directly instead of the generic path above, and `--raw` has no effect
+with it.
+
 For a bank-account statement downloaded directly from the bank's own
 website as an Excel export (`.xls`/`.xlsx`) rather than emailed as a PDF,
 use `excel extract` instead — no password is ever requested, since these
