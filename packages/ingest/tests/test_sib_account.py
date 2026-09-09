@@ -85,5 +85,49 @@ def test_running_balance_matches_the_files_own_balance_column():
         assert round(running, 2) == expected_balance
 
 
+def test_genuinely_separate_same_day_transactions_with_identical_text_are_disambiguated():
+    """Confirmed against a real statement: two separate NACH-return
+    bounce-charge events on the same day can print byte-identical
+    Particulars text (the narration carries no per-instance reference,
+    unlike a SIP debit's CAMS reference number) -- the bank's own running
+    balance treats both as real, separate deductions. munim's
+    content-hash dedup (date+amount+direction+description+account) would
+    otherwise silently collapse the second one into "already imported",
+    permanently losing ₹618 across three such rows in one real
+    statement. A distinguishing counter suffix on the 2nd+ occurrence of
+    an exact (date, description, amount) repeat keeps both real
+    transactions in the ledger without touching the many genuinely
+    single occurrences elsewhere in the same file."""
+    rows = _sheet(
+        ["373", "07-Nov-2024", "07-Nov-2024", "NACHDR RETN CHRG:CAMS LTD:06-11-2024/",
+         "", "", "", "100.00", "", "9,050.89"],
+        ["374", "07-Nov-2024", "07-Nov-2024", "GST FOR NACHDR RETURN:CAMS LTD:06-11-2024/",
+         "", "", "", "18.00", "", "9,032.89"],
+        ["375", "07-Nov-2024", "07-Nov-2024", "NACHDR RETN CHRG:INDIAIDEASLTD:06-11-2024/",
+         "", "", "", "100.00", "", "8,932.89"],
+        ["376", "07-Nov-2024", "07-Nov-2024", "GST FOR NACHDR RETURN:INDIAIDEASLTD:06-11-2024/",
+         "", "", "", "18.00", "", "8,914.89"],
+        ["377", "07-Nov-2024", "07-Nov-2024", "NACHDR RETN CHRG:CAMS LTD:06-11-2024/",
+         "", "", "", "100.00", "", "8,814.89"],
+        ["378", "07-Nov-2024", "07-Nov-2024", "GST FOR NACHDR RETURN:CAMS LTD:06-11-2024/",
+         "", "", "", "18.00", "", "8,796.89"],
+    )
+    result = _rows_to_transactions(rows)
+    descriptions = [desc for _, desc, _ in result]
+    # The two never-repeated rows (INDIAIDEASLTD) are untouched...
+    assert "NACHDR RETN CHRG:INDIAIDEASLTD:06-11-2024/" in descriptions
+    assert "GST FOR NACHDR RETURN:INDIAIDEASLTD:06-11-2024/" in descriptions
+    # ...the first occurrence of each repeated (date, desc, amount) is
+    # also untouched...
+    assert "NACHDR RETN CHRG:CAMS LTD:06-11-2024/" in descriptions
+    assert "GST FOR NACHDR RETURN:CAMS LTD:06-11-2024/" in descriptions
+    # ...but the second occurrence of each is disambiguated so it hashes
+    # to a different transaction id than the first.
+    assert "NACHDR RETN CHRG:CAMS LTD:06-11-2024/ (2)" in descriptions
+    assert "GST FOR NACHDR RETURN:CAMS LTD:06-11-2024/ (2)" in descriptions
+    assert len(result) == 6
+    assert len(set(descriptions)) == 6
+
+
 def test_header_row_shape():
     assert HEADER_ROW == ["Date", "Particulars", "Amount"]

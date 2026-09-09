@@ -19,11 +19,24 @@ this module's own running balance (opening balance + cumulative signed
 amount) matches the file's own printed Balance Amount column for every
 row — the strongest cross-check available, since this export (unlike
 SBI's) prints its own running balance.
+
+A real, separate issue found in that same verification: munim's import
+dedups by content hash (date + amount + direction + description +
+account), and this bank's Particulars narration sometimes carries no
+per-instance reference at all — two genuinely separate same-day NACH
+bounce-charge events print byte-identical text, unlike a SIP debit's
+narration, which carries a unique CAMS reference. Importing all four
+statements as-is silently collapsed three such rows into their earlier
+duplicate, undercounting real debits by ₹618 in the final ledger balance
+(confirmed against the account's own true closing balance). The second
+and later occurrence of an exact (date, description, amount) repeat is
+now suffixed with a counter so each stays a distinct transaction.
 """
 from __future__ import annotations
 
 import csv
 import re
+from collections import Counter
 from pathlib import Path
 
 HEADER_ROW = ["Date", "Particulars", "Amount"]
@@ -56,11 +69,18 @@ def _rows_to_transactions(rows: list[list[str]]) -> list[tuple[str, str, str]]:
     """Rows before/after the real transaction table (the preamble and
     the "****End of A/c Statement****" footer) are excluded by requiring
     column 1 (Transaction Date) to look like a DD-Mon-YYYY date — neither
-    surrounding block has that shape."""
+    surrounding block has that shape.
+
+    An exact (date, description, amount) repeat gets its 2nd+ occurrence
+    suffixed " (N)" — see the module docstring: this bank's narration
+    sometimes carries no per-instance reference, so two genuinely
+    separate transactions can otherwise be indistinguishable from one
+    row imported twice, and munim's content-hash dedup would silently
+    drop the real second one."""
     header_idx = _find_header_row(rows)
     if header_idx is None:
         return []
-    result = []
+    parsed = []
     for row in rows[header_idx + 1:]:
         if len(row) < 9:
             continue
@@ -71,7 +91,16 @@ def _rows_to_transactions(rows: list[list[str]]) -> list[tuple[str, str, str]]:
         withdrawal = _parse_amount(row[7].strip())
         deposit = _parse_amount(row[8].strip())
         signed = deposit - withdrawal
-        result.append((date_str, particulars, f"{signed:.2f}"))
+        parsed.append([date_str, particulars, f"{signed:.2f}"])
+
+    seen: Counter = Counter()
+    result = []
+    for date_str, particulars, signed_str in parsed:
+        key = (date_str, particulars, signed_str)
+        seen[key] += 1
+        if seen[key] > 1:
+            particulars = f"{particulars} ({seen[key]})"
+        result.append((date_str, particulars, signed_str))
     return result
 
 
