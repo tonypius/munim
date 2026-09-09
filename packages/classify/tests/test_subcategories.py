@@ -444,6 +444,34 @@ def test_api_categories_usage_includes_credit_transactions(tmp_path):
         srv.shutdown()
 
 
+def test_api_categories_usage_includes_transfers(tmp_path):
+    """Every Transfers-categorized transaction carries is_transfer=True by
+    design (that's how the rest of the app tracks it) -- an is_transfer
+    exclusion here made the Transfers row permanently show zero
+    regardless of real activity, unlike the dashboard's own root-rollup
+    (_dashboard's `roots` dict), which has no such filter. 412 real
+    transactions moving real money showing as "0" is exactly the kind of
+    silent, structural undercount the direction-filter fix just addressed
+    for Income -- this is the same bug for a different exclusion."""
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Transfers"])
+    store.upsert_transactions([
+        Transaction(date="2026-06-01", amount=5000, direction=Direction.DEBIT,
+                    description_raw="TO SAVINGS", category="Transfers",
+                    is_transfer=True),
+        Transaction(date="2026-06-02", amount=5000, direction=Direction.CREDIT,
+                    description_raw="FROM CREDIT CARD", category="Transfers",
+                    is_transfer=True),
+    ])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/categories", timeout=3).read())
+        assert d["usage"]["Transfers"] == {"n": 2, "total": 10000.0}
+    finally:
+        srv.shutdown()
+
+
 def test_api_rules_includes_subcategory_field(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("region", "in")
