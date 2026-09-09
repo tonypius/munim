@@ -47,10 +47,19 @@ def test_simple_credit_line_payment_received():
     ]
 
 
-def test_description_with_pay_in_emis_suffix_is_preserved():
+def test_pay_in_emis_suffix_is_stripped():
+    """This e-statement format annotates a transaction converted to EMI
+    with a trailing "(Pay in EMIs)" that the netbanking "Transaction
+    History" export (sbi_credit_card.py) never carries for the same real
+    transaction. Left in, it silently defeats munim's content-hash dedup
+    across the two formats' ~1-month overlap — confirmed as a real bug:
+    three real transactions (Fame Diagnostic, Favourite Shop, and a
+    payment for a family birthday party at Joys Palace) were double-
+    counted for ₹21,905 total the first time this format was imported,
+    because only the e-statement's copy of each carried this suffix."""
     page = FakePage("31 May 25 Fame Diagnostic & BANGALORE IN (Pay in EMIs) 3,400.00 D")
     assert parse_transactions([page]) == [
-        ("31/05/2025", "Fame Diagnostic & BANGALORE IN (Pay in EMIs)", "-3400.00")
+        ("31/05/2025", "Fame Diagnostic & BANGALORE IN", "-3400.00")
     ]
 
 

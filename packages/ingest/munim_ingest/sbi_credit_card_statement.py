@@ -34,6 +34,16 @@ The statement's own "DD Mon YY" dates are normalized to "DD/MM/YYYY"
 here (rather than left as-is) so this module's CSV output matches
 sbi_credit_card.py's date shape exactly — both bank flags can then share
 one munim `csv_profiles` entry instead of needing two.
+
+A transaction converted to EMI carries a trailing "(Pay in EMIs)" here
+that the netbanking "Transaction History" export never has for the same
+real transaction — left in, it silently defeats munim's content-hash
+dedup (date+amount+direction+description) across the two formats'
+overlapping date range, so it's stripped before this module's description
+output. Confirmed as a real bug, not a hypothetical: the first real
+import of this format double-counted three EMI transactions (₹21,905
+total) against data already imported from the netbanking export, purely
+because only the e-statement's copy of each carried this suffix.
 """
 from __future__ import annotations
 
@@ -43,6 +53,7 @@ from datetime import datetime
 _LINE_RE = re.compile(
     r"^(?:(?P<date>\d{2} [A-Za-z]{3} \d{2}) )?(?P<desc>.+) (?P<amount>[\d,]+\.\d{2}) (?P<type>[CD])$"
 )
+_EMI_SUFFIX_RE = re.compile(r"\s*\(Pay in EMIs\)$")
 
 HEADER_ROW = ["Date", "Description", "Amount (in Rs.)"]
 
@@ -57,7 +68,8 @@ def _parse_line(line: str, inherited_date: str | None) -> tuple[str, str, str] |
     date = datetime.strptime(raw_date, "%d %b %y").strftime("%d/%m/%Y")
     amount = float(match["amount"].replace(",", ""))
     signed = amount if match["type"] == "C" else -amount
-    return (date, match["desc"].strip(), f"{signed:.2f}")
+    desc = _EMI_SUFFIX_RE.sub("", match["desc"].strip())
+    return (date, desc, f"{signed:.2f}")
 
 
 def parse_transactions(pages) -> list[tuple[str, str, str]]:
