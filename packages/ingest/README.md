@@ -59,6 +59,17 @@ form one ruled table, but that table's cells are column-major in a way
 that isn't safely index-alignable, so this reads one transaction per
 physical text line instead; `--raw` has no effect with it either.
 
+### Running the SBI Card fetch monthly
+
+`scripts/sbi-monthly-sync.sh you@gmail.com` runs the whole routine in one
+go: fetches any e-statement emails newer than the last one already
+downloaded, extracts each with `--bank sbi-statement`, and imports the
+result with the saved `sbi-cc` csv profile. It prompts for both passwords
+interactively (or reads them from the environment variables above if
+already set) — nothing is written to disk. There's no scheduler behind
+it; run it yourself whenever a new statement's landed (e.g. once a
+month), then run `munim review` for anything it couldn't auto-classify.
+
 For a bank-account statement downloaded directly from the bank's own
 website as an Excel export (`.xls`/`.xlsx`) rather than emailed as a PDF,
 use `excel extract` instead — no password is ever requested, since these
