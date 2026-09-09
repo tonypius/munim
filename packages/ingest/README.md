@@ -59,6 +59,15 @@ form one ruled table, but that table's cells are column-major in a way
 that isn't safely index-alignable, so this reads one transaction per
 physical text line instead; `--raw` has no effect with it either.
 
+Pass `--bank sib` for South Indian Bank's emailed "Statement of Account"
+PDF (a different document from `csv extract --bank sib` above, which
+handles that bank's netbanking CSV export instead). This one forms no
+ruled table at all — a borderless, position-only layout where a wrapped
+row's Withdrawals/Deposits/Balance figures sit on their own physical
+line between the two fragments of a wrapped Particulars narration — so
+it reads each word's own position on the page, same approach as
+`--bank sbi`; `--raw` has no effect with it either.
+
 ### Running the SBI Card fetch monthly
 
 `scripts/sbi-monthly-sync.sh you@gmail.com` runs the whole routine in one

@@ -18,6 +18,7 @@ from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc
 from . import sbi_credit_card
 from . import sbi_credit_card_statement
 from . import sib_account
+from . import sib_account_pdf
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -50,15 +51,16 @@ BANK_NORMALIZERS = {
     "hdfc-bank": hdfc_bank_account.normalize_hdfc_bank_account_rows,
 }
 
-# --bank sbi and --bank sbi-statement don't go through BANK_NORMALIZERS at
-# all — see the early special cases in pdf_extract_cmd for why
-# (extract_rows()/filter_transaction_rows() are actively wrong for both:
-# sbi's netbanking export never forms a real ruled table, and
-# sbi-statement's one ruled table has column-major cells that aren't
-# safely index-alignable). Still recognized --bank values, so both are
-# included here for validation and help text alongside the banks that do
-# use BANK_NORMALIZERS.
-PDF_BANKS = (*BANK_NORMALIZERS, "sbi", "sbi-statement")
+# --bank sbi, --bank sbi-statement, and --bank sib don't go through
+# BANK_NORMALIZERS at all — see the early special cases in
+# pdf_extract_cmd for why (extract_rows()/filter_transaction_rows() are
+# actively wrong for all three: sbi's netbanking export never forms a
+# real ruled table, sbi-statement's one ruled table has column-major
+# cells that aren't safely index-alignable, and sib's yearly statement
+# forms no ruled table at all). Still recognized --bank values, so all
+# three are included here for validation and help text alongside the
+# banks that do use BANK_NORMALIZERS.
+PDF_BANKS = (*BANK_NORMALIZERS, "sbi", "sbi-statement", "sib")
 
 # pretty_exceptions_show_locals=False: an unhandled exception anywhere in
 # this CLI must never render a locals table, which would print the Gmail
@@ -273,8 +275,8 @@ def pdf_extract_cmd(
     bank: str = typer.Option(
         None, "--bank",
         help=f"Apply a bank-specific amount normalization after the "
-             f"generic filter (ignored with --raw, except --bank sbi and "
-             f"--bank sbi-statement — see below). "
+             f"generic filter (ignored with --raw, except --bank sbi, "
+             f"--bank sbi-statement, and --bank sib — see below). "
              f"Available: {', '.join(PDF_BANKS)}."),
 ):
     """Decrypt a password-protected statement PDF and extract its rows to a
@@ -307,9 +309,16 @@ def pdf_extract_cmd(
     emailed e-statement (--bank sbi-statement) does form one ruled table,
     but its cells are column-major in a way that isn't safely
     index-alignable (see sbi_credit_card_statement.py), so it instead
-    reads one transaction per physical text line. --raw has no effect
-    with either. Run `munim import` on the output next to map columns
-    and classify, same as any bank CSV export.
+    reads one transaction per physical text line. South Indian Bank's
+    emailed yearly statement (--bank sib) forms no ruled table at all
+    (a borderless, position-only layout) — like --bank sbi, it reads
+    each word's own position on the page directly (see
+    sib_account_pdf.py), necessary because a wrapped row's Withdrawals/
+    Deposits/Balance figures sit on their own physical line between the
+    two fragments of a wrapped Particulars narration. --raw has no
+    effect with any of the three.
+    Run `munim import` on the output next to map columns and classify,
+    same as any bank CSV export.
     """
     if bank is not None and bank not in PDF_BANKS:
         console.print(
@@ -379,6 +388,38 @@ def pdf_extract_cmd(
                     "changed.[/yellow]")
                 raise typer.Exit(1)
             final_rows = [sbi_credit_card_statement.HEADER_ROW, *final_rows]
+            out_path = out or file.with_suffix(".csv")
+            if out_path.exists():
+                console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
+            write_csv(final_rows, out_path)
+            console.print(
+                f"[green]Extracted {len(final_rows) - 1} transaction row(s) "
+                f"to {escape(str(out_path))}[/green]", soft_wrap=True)
+            console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
+                          "to map columns and classify.", soft_wrap=True)
+            return
+
+        if bank == "sib":
+            # Bypasses extract_rows()/filter_transaction_rows() entirely —
+            # this bank's yearly statement forms no ruled table at all
+            # (a borderless, position-only layout), so it reads each
+            # word's own position on the page directly instead, same
+            # rationale as --bank sbi.
+            if raw:
+                console.print(
+                    "[yellow]--raw has no effect for --bank sib: this "
+                    "bank's transactions are read from each word's own "
+                    "position on the page, not through the generic "
+                    "row/table path --raw controls.[/yellow]")
+            with open_pdf(file, password) as pdf:
+                final_rows = sib_account_pdf.parse_transactions(pdf.pages)
+            if not final_rows:
+                console.print(
+                    "[yellow]No transactions found — this may not be a "
+                    "SIB yearly statement, or its format has "
+                    "changed.[/yellow]")
+                raise typer.Exit(1)
+            final_rows = [sib_account_pdf.HEADER_ROW, *final_rows]
             out_path = out or file.with_suffix(".csv")
             if out_path.exists():
                 console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
