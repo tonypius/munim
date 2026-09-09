@@ -17,6 +17,7 @@ from .csv_writer import write_csv
 from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc_credit_card_v2
 from . import sbi_credit_card
 from . import sbi_credit_card_statement
+from . import sib_account
 from .hdfc_credit_card import normalize_hdfc_credit_card_amounts, normalize_hdfc_credit_card_dates
 from .imap_client import ImapConfig, connect, search_uids
 from .packs import PackNotFoundError, list_packs, load_pack
@@ -101,6 +102,26 @@ app.add_typer(excel_app, name="excel")
 # by default, same rationale as BANK_NORMALIZERS below.
 EXCEL_PARSERS = {
     "hdfc-bank": hdfc_bank_account_excel.parse_hdfc_bank_excel,
+}
+
+csv_app = typer.Typer(
+    help="Extract bank statement CSV exports (downloaded directly from "
+         "the bank's own website, not emailed) into a clean CSV for "
+         "`munim import`.",
+    # See the same note on gmail_app above: the real protection is the
+    # top-level `app`'s setting, this one is kept for explicitness only.
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(csv_app, name="csv")
+
+# Bank-specific direct-website CSV-export parsers, opted into via
+# `csv extract --bank`. Each is scoped to exactly one bank's known
+# preamble/column layout — never applied by default, same rationale as
+# BANK_NORMALIZERS and EXCEL_PARSERS above. Distinct from `excel extract`
+# because these banks' own netbanking portals export CSV directly (no
+# spreadsheet library needed), not .xls/.xlsx.
+CSV_PARSERS = {
+    "sib": sib_account.parse_sib_account_csv,
 }
 
 DEFAULT_HOME = Path.home() / ".munim-ingest"
@@ -551,6 +572,67 @@ def excel_extract_cmd(
     final_rows = [header_row, *rows]
 
     out_path = out or file.with_suffix(".csv")
+    if out_path.exists():
+        console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
+    write_csv(final_rows, out_path)
+    console.print(
+        f"[green]Extracted {len(rows)} transaction row(s) to {escape(str(out_path))}[/green]",
+        soft_wrap=True)
+    console.print(f"\nNext: [bold]munim import {escape(str(out_path))}[/bold] "
+                  "to map columns and classify.", soft_wrap=True)
+
+
+@csv_app.command("extract")
+def csv_extract_cmd(
+    file: Path = typer.Argument(..., exists=True,
+                                 help="Bank statement CSV export, downloaded directly from the bank's website"),
+    out: Path = typer.Option(None, help="Output CSV path (default: <file>.csv next to the source)"),
+    bank: str = typer.Option(
+        ..., "--bank",
+        help=f"Which bank's direct-website CSV export layout to parse. Available: "
+             f"{', '.join(CSV_PARSERS)}."),
+):
+    """Parse a bank statement CSV export — downloaded directly from the
+    bank's own netbanking portal, not emailed — into a clean CSV for
+    `munim import`. Unlike `pdf extract`, no password is ever requested:
+    these exports aren't encrypted the way emailed statement PDFs are.
+    The source file already is a CSV, but not one munim import's generic
+    loader can read directly — a preamble block (account holder details,
+    statement metadata) sits before the real column header, and a
+    footer sits after the last real row; this strips both.
+    """
+    if bank not in CSV_PARSERS:
+        console.print(
+            f"[red]Unknown --bank '{escape(bank)}'. Available: "
+            f"{', '.join(CSV_PARSERS)}.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        rows = CSV_PARSERS[bank](file)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        raise typer.Exit(1)
+
+    if not rows:
+        console.print(
+            "[yellow]No transaction rows found in this file — the parser "
+            "may not fit this export's layout.[/yellow]")
+        raise typer.Exit(1)
+
+    header_row = sib_account.HEADER_ROW if bank == "sib" else [f"Column {i + 1}" for i in range(len(rows[0]))]
+    final_rows = [header_row, *rows]
+
+    # Unlike pdf/excel extract, the source here is already a .csv — a
+    # bare with_suffix(".csv") default would silently collide with (and
+    # overwrite) the input file itself, destroying the raw export.
+    out_path = out or file.with_name(f"{file.stem}.parsed.csv")
+    if out_path == file:
+        console.print(
+            f"[red]--out must not be the same file as the input "
+            f"({escape(str(file))}) — this would overwrite your source export.[/red]")
+        raise typer.Exit(1)
     if out_path.exists():
         console.print(f"[yellow]Overwriting existing {escape(str(out_path))}[/yellow]")
     write_csv(final_rows, out_path)

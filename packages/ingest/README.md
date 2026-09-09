@@ -85,6 +85,23 @@ current list of supported layouts. Same output convention as `pdf
 extract`: `statement.csv` next to the source by default, `--out` to
 choose another path.
 
+Some banks' netbanking portals export a bank-account statement as CSV
+directly (South Indian Bank's "Transaction History" download, e.g.
+`OpTransactionHistory13-12-2024.csv`) rather than a spreadsheet — use
+`csv extract` for those. The file is already a CSV, but not one `munim
+import` can read as-is: a preamble (account holder details, statement
+metadata) sits before the real column header, and a footer sits after
+the last row.
+
+```sh
+munim-ingest csv extract OpTransactionHistory13-12-2024.csv --bank sib
+```
+
+No password is requested, same as `excel extract`. Output defaults to
+`<file>.parsed.csv` next to the source — not `<file>.csv`, since the
+source here already has that extension and a plain suffix swap would
+silently overwrite it.
+
 ### The app password / PDF password
 
 Gmail needs an [app password](https://support.google.com/accounts/answer/185833)
