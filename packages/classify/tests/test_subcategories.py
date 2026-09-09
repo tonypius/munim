@@ -417,6 +417,33 @@ def test_api_categories_includes_subcategory_usage_stats(tmp_path):
         srv.shutdown()
 
 
+def test_api_categories_usage_includes_credit_transactions(tmp_path):
+    """Income (and any other category that's naturally credit-side, like
+    Transfers or Investments) must not be silently excluded from usage
+    stats just because it holds credits rather than debits -- a prior
+    debit-only filter here made an account with 153 real salary credits
+    show as "1 transaction" on the Categories page, because only one
+    stray misclassified debit happened to carry that category."""
+    store = Store(home=tmp_path)
+    store.set_config("categories", ["Income", "Groceries"])
+    store.upsert_transactions([
+        Transaction(date="2026-06-01", amount=50000, direction=Direction.CREDIT,
+                    description_raw="SALARY CREDIT", category="Income"),
+        Transaction(date="2026-06-02", amount=50000, direction=Direction.CREDIT,
+                    description_raw="SALARY CREDIT 2", category="Income"),
+        Transaction(date="2026-06-03", amount=300, direction=Direction.DEBIT,
+                    description_raw="SUPERMARKET", category="Groceries"),
+    ])
+    srv, port = _server(store)
+    try:
+        d = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/categories", timeout=3).read())
+        assert d["usage"]["Income"] == {"n": 2, "total": 100000.0}
+        assert d["usage"]["Groceries"] == {"n": 1, "total": 300.0}
+    finally:
+        srv.shutdown()
+
+
 def test_api_rules_includes_subcategory_field(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("region", "in")

@@ -406,7 +406,13 @@ class Handler(BaseHTTPRequestHandler):
         usage: dict[str, dict] = defaultdict(lambda: {"n": 0, "total": 0.0})
         subcat_usage: dict[str, dict] = defaultdict(dict)
         for t in self.store.all_transactions():
-            if t.category and t.direction.value == "debit" and not t.is_transfer:
+            # No direction filter: a credit-side category (Income,
+            # Investments) is just as real as a debit-side one (Groceries)
+            # -- filtering to debit-only here once made an account with
+            # 153 real salary credits show as "1 transaction" on this
+            # page, because only a single stray misclassified debit
+            # happened to carry the Income category.
+            if t.category and not t.is_transfer:
                 usage[t.category]["n"] += 1
                 usage[t.category]["total"] += t.amount
                 if t.subcategory:
