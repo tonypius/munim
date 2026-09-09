@@ -35,10 +35,17 @@ own Balance column for every row on every sampled page, and the
 statement's own opening balance exactly equals the closing balance
 already on file from the netbanking CSV export covering the prior
 period (sib_account.py) — no gap, no overlap.
+
+This statement's own "DD-MM-YY" dates are normalized to "DD-Mon-YYYY"
+here (rather than left as-is) so this module's CSV output matches
+sib_account.py's date shape exactly — both bank flags can then share
+one munim `csv_profiles` entry instead of needing two.
 """
 from __future__ import annotations
 
 import re
+from collections import Counter
+from datetime import datetime
 
 _DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{2}$")
 _AMOUNT_RE = re.compile(r"^[\d,]+\.\d{2}$")
@@ -99,7 +106,8 @@ def _parse_page(words: list[dict]) -> list[tuple[str, str, str]]:
         w_amt = float(withdrawal.replace(",", "")) if withdrawal else 0.0
         d_amt = float(deposit.replace(",", "")) if deposit else 0.0
         signed = d_amt - w_amt
-        result.append((d["text"], " ".join(desc_words), f"{signed:.2f}"))
+        date = datetime.strptime(d["text"], "%d-%m-%y").strftime("%d-%b-%Y")
+        result.append((date, " ".join(desc_words), f"{signed:.2f}"))
     return result
 
 
@@ -108,10 +116,28 @@ def parse_transactions(pages) -> list[tuple[str, str, str]]:
     objects, or anything exposing the same `.extract_words()` interface)
     into (date, description, signed amount) tuples — negative for a
     Withdrawal row, positive for a Deposit row, munim's expected single-
-    signed-amount-column convention."""
-    result = []
+    signed-amount-column convention.
+
+    An exact (date, description, amount) repeat — across pages, since a
+    same-day repeat can span a page boundary — gets its 2nd+ occurrence
+    suffixed " (N)". This account runs several HDFC MF SIPs that debit
+    the identical ₹500 via the same NACH batch on the same day with no
+    per-instance reference in the narration (241 such repeat groups in
+    one real 599-transaction statement); left alone, munim's
+    content-hash dedup would silently collapse each pair into one,
+    losing real money."""
+    parsed = []
     for page in pages:
         words = page.extract_words()
         if words:
-            result.extend(_parse_page(words))
+            parsed.extend(_parse_page(words))
+
+    seen: Counter = Counter()
+    result = []
+    for date_str, desc, signed_str in parsed:
+        key = (date_str, desc, signed_str)
+        seen[key] += 1
+        if seen[key] > 1:
+            desc = f"{desc} ({seen[key]})"
+        result.append((date_str, desc, signed_str))
     return result

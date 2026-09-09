@@ -50,7 +50,7 @@ def test_wrapped_withdrawal_row_with_narration_split_around_the_amount_line():
         w("LTD/ACH_DR", 87.0, 322.1),
     ])
     result = parse_transactions([page])
-    assert result[0] == ("01-04-25", "NACH_DR/SIBL0000000000965549/CAMS LTD/ACH_DR", "-500.00")
+    assert result[0] == ("01-Apr-2025", "NACH_DR/SIBL0000000000965549/CAMS LTD/ACH_DR", "-500.00")
 
 
 def test_unwrapped_row_with_everything_on_one_line():
@@ -61,7 +61,7 @@ def test_unwrapped_row_with_everything_on_one_line():
         w("5,243.49Cr", 531.4, 566.9),
     ])
     assert parse_transactions([page]) == [
-        ("06-04-25", "MOB/RRN-509608803622/Family/IMPS", "-9146.00")
+        ("06-Apr-2025", "MOB/RRN-509608803622/Family/IMPS", "-9146.00")
     ]
 
 
@@ -75,7 +75,7 @@ def test_deposit_row_produces_positive_signed_amount():
         w("40,000.00Cr", 527.0, 400.0),
     ])
     assert parse_transactions([page]) == [
-        ("07-04-25", "NEFT:TONY PIUS ALAPATT/", "20000.00")
+        ("07-Apr-2025", "NEFT:TONY PIUS ALAPATT/", "20000.00")
     ]
 
 
@@ -98,7 +98,7 @@ def test_page_total_footer_row_is_excluded():
         w("2,737.59Cr", 530.4, 768.1),
     ])
     result = parse_transactions([page])
-    assert result == [("09-04-25", "NACH_DR/SIBL0000000000965549/CAMS LTD/ACH_DR", "-500.00")]
+    assert result == [("09-Apr-2025", "NACH_DR/SIBL0000000000965549/CAMS LTD/ACH_DR", "-500.00")]
 
 
 def test_multiple_pages_combined_in_order():
@@ -116,8 +116,39 @@ def test_multiple_pages_combined_in_order():
     ])
     result = parse_transactions([page1, page2])
     assert result == [
-        ("01-04-25", "FIRST", "-500.00"),
-        ("02-04-25", "SECOND", "100.00"),
+        ("01-Apr-2025", "FIRST", "-500.00"),
+        ("02-Apr-2025", "SECOND", "100.00"),
+    ]
+
+
+def test_genuinely_separate_same_day_sip_debits_with_identical_text_are_disambiguated():
+    """Confirmed against a real statement: this account has several
+    HDFC MF SIP folios that all debit exactly ₹500 via the same NACH
+    mandate batch on the same day, with narration carrying no
+    per-instance reference at all -- 241 such repeat groups across one
+    real 599-transaction statement. Left alone, munim's content-hash
+    dedup (date+amount+direction+description+account) would silently
+    collapse each pair down to one, permanently losing real money from
+    the ledger. A distinguishing counter suffix on the 2nd+ occurrence of
+    an exact (date, description, amount) repeat -- across pages, since a
+    same-day repeat can span a page boundary -- keeps each as its own
+    transaction."""
+    page1 = FakePage([
+        w("01-04-25", 23.0, 285.1),
+        w("NACH_DR/SIBL0000000000965549/CAMS", 87.0, 285.1),
+        w("500.00", 374.5, 285.1),
+        w("20,389.49Cr", 527.0, 285.1),
+    ])
+    page2 = FakePage([
+        w("01-04-25", 23.0, 285.1),
+        w("NACH_DR/SIBL0000000000965549/CAMS", 87.0, 285.1),
+        w("500.00", 374.5, 285.1),
+        w("19,889.49Cr", 527.0, 285.1),
+    ])
+    result = parse_transactions([page1, page2])
+    assert result == [
+        ("01-Apr-2025", "NACH_DR/SIBL0000000000965549/CAMS", "-500.00"),
+        ("01-Apr-2025", "NACH_DR/SIBL0000000000965549/CAMS (2)", "-500.00"),
     ]
 
 
