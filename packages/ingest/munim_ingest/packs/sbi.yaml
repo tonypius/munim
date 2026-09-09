@@ -1,9 +1,17 @@
 bank: sbi
-# PLACEHOLDER — verify against a real SBI statement email's From: address
-# before relying on this. See Task 5's final step.
+# Confirmed 2026-09-09 against two real SBI Card statement emails:
+#   - elite.cards@sbicard.com — subject "Your SBI CARD ELITE Monthly Statement"
+#   - aurumcardstatement@sbicard.com — subject "Your AURUM Card Monthly Statement"
+# Both cards send from sender addresses under sbicard.com (the user held the
+# ELITE card first, then switched to AURUM) — sbi.co.in/onlinesbi.sbi were
+# unverified guesses and are dropped now that the real domain is known.
 from_domains:
-  - sbi.co.in
-  - onlinesbi.sbi
+  - sbicard.com
 attachment_extensions:
   - .csv
   - .pdf
+# "Monthly Statement" is common to both card products' subject lines and
+# narrows the IMAP search to statement emails specifically, same rationale
+# as hdfc.yaml's subject_keywords.
+subject_keywords:
+  - Monthly Statement

@@ -47,11 +47,17 @@ an existing output file at the same path (with a visible warning first),
 so save any manual edits elsewhere before re-extracting.
 
 Pass `--bank sbi` for an SBI credit card's "Transaction History" export
-(downloaded from netbanking or emailed as a statement). This bank's real
-transactions never form a ruled table at all — only its own column-header
-row does — so `--bank sbi` reads each word's own position on the page
-directly instead of the generic path above, and `--raw` has no effect
-with it.
+(downloaded from netbanking). This bank's real transactions never form a
+ruled table at all — only its own column-header row does — so `--bank
+sbi` reads each word's own position on the page directly instead of the
+generic path above, and `--raw` has no effect with it.
+
+Pass `--bank sbi-statement` instead for SBI Card's monthly *emailed*
+e-statement (the attachment on a "Your SBI CARD ... Monthly Statement"
+email — a different document from the netbanking export above). It does
+form one ruled table, but that table's cells are column-major in a way
+that isn't safely index-alignable, so this reads one transaction per
+physical text line instead; `--raw` has no effect with it either.
 
 For a bank-account statement downloaded directly from the bank's own
 website as an Excel export (`.xls`/`.xlsx`) rather than emailed as a PDF,
