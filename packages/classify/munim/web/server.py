@@ -341,6 +341,7 @@ class Handler(BaseHTTPRequestHandler):
         category = q.get("category", "")
         subcategory = q.get("subcategory", "")
         tag = q.get("tag", "")
+        account = q.get("account", "")
         all_txns = self.store.all_transactions()
         all_tags = self.store.all_tags()
         rows = []
@@ -354,6 +355,8 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             if subcategory and t.subcategory != subcategory:
                 continue
+            if account and t.account != account:
+                continue
             txn_tags = all_tags.get(t.id, [])
             if tag and tag not in txn_tags:
                 continue
@@ -366,7 +369,8 @@ class Handler(BaseHTTPRequestHandler):
                 break
         months = sorted({t.date.isoformat()[:7] for t in all_txns}, reverse=True)
         categories = sorted({t.category for t in all_txns if t.category})
-        return {"rows": rows, "months": months, "categories": categories}
+        accounts = sorted({t.account for t in all_txns if t.account})
+        return {"rows": rows, "months": months, "categories": categories, "accounts": accounts}
 
     def _queue(self, q):
         # Same param names as /api/transactions (month, q) for a consistent

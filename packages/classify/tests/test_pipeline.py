@@ -498,6 +498,51 @@ def test_web_transactions_category_filter_and_list(tmp_path):
     srv.shutdown()
 
 
+def test_web_transactions_account_filter_and_list(tmp_path):
+    """The ledger page's filter surface also needs an `account` filter —
+    exact match on the account name — plus an `accounts` list in the
+    response for populating that filter's dropdown, same shape as the
+    existing `category`/`categories` pair."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Groceries"])
+    txns = [
+        Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-SWIGGY DINER@okaxis-999912345001",
+                    category="Dining", account="tony-hdfc-savings",
+                    status=Status.CONFIRMED),
+        Transaction(date="2026-07-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-BIG BAZAAR MART@okaxis-999912345002",
+                    category="Groceries", account="tony-sib-savings",
+                    status=Status.CONFIRMED),
+    ]
+    store.upsert_transactions(txns)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    hdfc_rows = get("/api/transactions?account=tony-hdfc-savings")["rows"]
+    assert len(hdfc_rows) == 1 and "SWIGGY" in hdfc_rows[0]["raw"]
+
+    combined = get("/api/transactions?account=tony-sib-savings&category=Groceries")["rows"]
+    assert len(combined) == 1 and "BIG BAZAAR" in combined[0]["raw"]
+
+    full = get("/api/transactions")
+    assert set(full["accounts"]) == {"tony-hdfc-savings", "tony-sib-savings"}
+    srv.shutdown()
+
+
 def test_web_bulk_confirm(tmp_path):
     """POST /api/confirm with `ids` (plural) assigns one category to several
     transactions in one request — the review page's bulk-select feature."""

@@ -183,6 +183,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
     <select id="fCategory"><option value="">All heads</option><option value="__none__">No head</option></select>
     <select id="fSubcategory" hidden><option value="">All subcategories</option></select>
     <select id="fTag"><option value="">All tags</option></select>
+    <select id="fAccount"><option value="">All accounts</option></select>
     <input id="fSearch" placeholder="Search merchant, category, raw text" size="34">
   </div>
   <div class="controls" id="txnBulkBar" hidden>
@@ -368,15 +369,18 @@ function refreshSubcategoryFilter(){
 async function transactions(){
   if(!TAGS.length)await loadTags();
   const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value,
-        subcategory=$("#fSubcategory").value,tag=$("#fTag").value;
+        subcategory=$("#fSubcategory").value,tag=$("#fTag").value,account=$("#fAccount").value;
   refreshSubcategoryFilter();
-  const params=new URLSearchParams({month,q,category,subcategory,tag});
+  const params=new URLSearchParams({month,q,category,subcategory,tag,account});
   const d=await api(`/api/transactions?${params}`);
   if($("#fMonth").options.length===1)
     d.months.forEach(m=>$("#fMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
   if($("#fCategory").options.length===2)
     d.categories.forEach(c=>$("#fCategory")
       .insertAdjacentHTML("beforeend",`<option value="${esc(c)}">${esc(c)}</option>`));
+  if($("#fAccount").options.length===1)
+    d.accounts.forEach(a=>$("#fAccount")
+      .insertAdjacentHTML("beforeend",`<option value="${esc(a)}">${esc(a)}</option>`));
   const rows=d.rows;
   $("#txnBody").innerHTML=rows.length?`<table><thead><tr>
     <th><input type="checkbox" id="txnSelectAll" title="Select all"></th>
@@ -402,6 +406,7 @@ $("#fMonth")?.addEventListener("change",transactions);
 $("#fCategory")?.addEventListener("change",transactions);
 $("#fSubcategory")?.addEventListener("change",transactions);
 $("#fTag")?.addEventListener("change",transactions);
+$("#fAccount")?.addEventListener("change",transactions);
 let deb;$("#fSearch")?.addEventListener("input",()=>{clearTimeout(deb);deb=setTimeout(transactions,250)});
 $("#txnBody").addEventListener("change",e=>{
   if(e.target.id==="txnSelectAll"){
