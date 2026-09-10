@@ -382,7 +382,8 @@ class Handler(BaseHTTPRequestHandler):
         # filtering narrows that same ordered list, it doesn't reorder it.
         month, needle = q.get("month", ""), q.get("q", "").upper()
         suggested = q.get("suggested", "")
-        filtered = bool(month or needle or suggested)
+        account = q.get("account", "")
+        filtered = bool(month or needle or suggested or account)
         limit = 500 if filtered else 100
         queue = self.store.review_queue()
         rows = []
@@ -392,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
             if suggested == "__none__" and t.category:
                 continue
             if suggested and suggested != "__none__" and t.category != suggested:
+                continue
+            if account and t.account != account:
                 continue
             if needle:
                 hay = f"{t.merchant_norm} {t.payee_handle} {t.category} " \
@@ -403,7 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                 break
         months = sorted({t.date.isoformat()[:7] for t in queue}, reverse=True)
         suggestions = sorted({t.category for t in queue if t.category})
-        return {"rows": rows, "months": months, "suggestions": suggestions}
+        accounts = sorted({t.account for t in queue if t.account})
+        return {"rows": rows, "months": months, "suggestions": suggestions, "accounts": accounts}
 
     def _categories(self):
         cats = self.store.get_config("categories", [])

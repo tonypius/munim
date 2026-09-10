@@ -166,6 +166,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <div class="controls">
     <select id="rMonth"><option value="">All months</option></select>
     <select id="rSuggested"><option value="">All suggestions</option><option value="__none__">No suggestion</option></select>
+    <select id="rAccount"><option value="">All accounts</option></select>
     <input id="rSearch" placeholder="Search merchant, category, raw text" size="34">
   </div>
   <div class="controls" id="bulkBar" hidden>
@@ -258,15 +259,18 @@ async function overview(){
 /* review */
 async function review(){
   const month=$("#rMonth")?.value||"", qtext=$("#rSearch")?.value||"",
-        suggested=$("#rSuggested")?.value||"";
-  const filtered=!!(month||qtext||suggested);
-  const params=new URLSearchParams({month,q:qtext,suggested});
-  const {rows,months,suggestions}=await api(`/api/queue?${params}`);
+        suggested=$("#rSuggested")?.value||"", account=$("#rAccount")?.value||"";
+  const filtered=!!(month||qtext||suggested||account);
+  const params=new URLSearchParams({month,q:qtext,suggested,account});
+  const {rows,months,suggestions,accounts}=await api(`/api/queue?${params}`);
   if($("#rMonth").options.length===1)
     months.forEach(m=>$("#rMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
   if($("#rSuggested").options.length===2)
     suggestions.forEach(s=>$("#rSuggested")
       .insertAdjacentHTML("beforeend",`<option value="${esc(s)}">${esc(s)}</option>`));
+  if($("#rAccount").options.length===1)
+    accounts.forEach(a=>$("#rAccount")
+      .insertAdjacentHTML("beforeend",`<option value="${esc(a)}">${esc(a)}</option>`));
   if(!rows.length){
     $("#reviewBody").innerHTML=`<p class="empty">${filtered
       ?"No entries match — try clearing a filter."
@@ -277,7 +281,7 @@ async function review(){
   const opts=cat=>CATS.map(c=>`<option ${c===cat?"selected":""}>${esc(c)}</option>`).join("");
   $("#reviewBody").innerHTML=`<table><thead><tr>
     <th><input type="checkbox" id="selectAll" title="Select all"></th>
-    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Suggested</th><th>Head</th><th></th>
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Suggested</th><th>Head</th><th>Account</th><th></th>
   </tr></thead><tbody>`+rows.map(r=>`<tr data-id="${r.id}">
     <td><input type="checkbox" class="rowSel" value="${r.id}"></td>
     <td class="num">${r.date}</td>
@@ -285,6 +289,7 @@ async function review(){
     ${amountCell(r)}
     <td>${r.category?esc(r.category):'<span class="tag">no suggestion</span>'}</td>
     <td><select>${opts(r.category)}</select></td>
+    <td class="merchant">${esc(r.account)}</td>
     <td><button class="confirm">Confirm</button></td>
   </tr>`).join("")+`</tbody></table>`;
   $("#bulkCat").innerHTML=opts("");
@@ -297,6 +302,7 @@ function updateBulkBar(){
 }
 $("#rMonth").addEventListener("change",review);
 $("#rSuggested").addEventListener("change",review);
+$("#rAccount").addEventListener("change",review);
 let rdeb;$("#rSearch").addEventListener("input",()=>{clearTimeout(rdeb);rdeb=setTimeout(review,250)});
 /* Selection: delegated on the stable #reviewBody container, same reason
    as the confirm-button listener below — checkboxes are recreated on

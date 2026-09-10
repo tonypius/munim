@@ -443,6 +443,50 @@ def test_web_queue_search_and_filters(tmp_path):
     srv.shutdown()
 
 
+def test_web_queue_account_filter_and_list(tmp_path):
+    """The review page's filter surface also needs an `account` filter —
+    exact match on the account name, same as /api/transactions — plus an
+    `accounts` list in the response for populating that filter's
+    dropdown, so a large multi-account review queue can be narrowed to
+    one account at a time."""
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("currency", "INR")
+    store.set_config("categories", ["Dining", "Groceries"])
+    txns = [
+        Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="UPI-UNMAPPED MART@okaxis-999912345001",
+                    account="tony-hdfc-savings"),
+        Transaction(date="2026-07-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="UPI-RANDOM UNKNOWN CO@okaxis-999912345002",
+                    account="tony-sib-savings"),
+    ]
+    store.upsert_transactions(txns)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    hdfc_rows = get("/api/queue?account=tony-hdfc-savings")["rows"]
+    assert len(hdfc_rows) == 1 and "UNMAPPED MART" in hdfc_rows[0]["raw"]
+
+    combined = get("/api/queue?account=tony-sib-savings&month=2026-07")["rows"]
+    assert len(combined) == 1 and "RANDOM UNKNOWN" in combined[0]["raw"]
+
+    full = get("/api/queue")
+    assert set(full["accounts"]) == {"tony-hdfc-savings", "tony-sib-savings"}
+    srv.shutdown()
+
+
 def test_web_transactions_category_filter_and_list(tmp_path):
     """The transactions ("ledger") page's search/filter surface should
     match the review page's: /api/transactions already had month + q, this
