@@ -158,6 +158,8 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <div id="dashRoots" class="roots"></div>
   <div id="dashStats" class="note"></div>
   <div id="dashMonths"></div>
+  <h2 style="font-size:16px;margin-top:26px">Net worth over time</h2>
+  <div id="dashNetWorth"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:26px">
     <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Heads of account</h2><div id="dashCats"></div></div>
     <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Where the money goes</h2><div id="dashMerchants"></div></div>
@@ -254,7 +256,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=(n,c)=>`${c==="INR"?"₹":c+" "}${Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-let monthsChart,catsChart,merchantsChart;
+let monthsChart,catsChart,merchantsChart,netWorthChart;
 const destroyChart=c=>{if(c)c.destroy()};
 let CATS=[],CUR="INR";
 
@@ -577,6 +579,20 @@ async function dashboard(){
      <div class="rootv ${r==="Income"?"credit":r==="Expenses"?"debit":""}">${fmt(R[r],CUR)}</div></div>`
   ).join("")+`<div class="root"><div class="rootl">Net (In − Ex)</div>
      <div class="rootv ${d.net>=0?"credit":"debit"}">${fmt(d.net,CUR)}</div></div>`;
+  const nw=await api("/api/chart/balance");
+  if(nw.labels.length){
+    $("#dashNetWorth").innerHTML=`<canvas id="dashNetWorthCanvas" height="90"></canvas>`;
+    destroyChart(netWorthChart);
+    netWorthChart=new Chart($("#dashNetWorthCanvas"),{type:"line",
+      data:{labels:nw.labels,
+            datasets:[{data:nw.values,borderColor:cssVar("--pen-blue"),
+                       backgroundColor:cssVar("--pen-blue"),tension:0.15,fill:false}]},
+      options:{plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
+               scales:{y:{ticks:{callback:v=>fmt(v,CUR)}}}}});
+  } else {
+    $("#dashNetWorth").innerHTML=`<p class="empty">No accounts have an opening balance set yet — run <code>munim accounts set-opening-balance</code> to start tracking net worth.</p>`;
+  }
   if(!d.months.length){$("#dashStats").textContent="No spending matches these filters.";
     $("#dashMonths").innerHTML="";$("#dashCats").innerHTML="";$("#dashMerchants").innerHTML="";return}
   $("#dashStats").innerHTML=`Spend <b>${fmt(d.total,CUR)}</b> ·
