@@ -14,7 +14,7 @@ from rich.markup import escape
 
 from .attachments import extract_attachments, save_attachments
 from .csv_writer import write_csv
-from . import hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc_credit_card_v2
+from . import axis_bank_account_excel, hdfc_bank_account, hdfc_bank_account_excel, hdfc_credit_card, hdfc_credit_card_v2
 from . import sbi_credit_card
 from . import sbi_credit_card_statement
 from . import sib_account
@@ -104,7 +104,14 @@ app.add_typer(excel_app, name="excel")
 # by default, same rationale as BANK_NORMALIZERS below.
 EXCEL_PARSERS = {
     "hdfc-bank": hdfc_bank_account_excel.parse_hdfc_bank_excel,
+    "axis": axis_bank_account_excel.parse_axis_bank_excel,
 }
+
+# Banks whose EXCEL_PARSERS entry already returns munim's canonical
+# (Date, Narration, Amount) shape — these get the shared HEADER_ROW
+# instead of the generic "Column N" fallback below.
+_EXCEL_CANONICAL_HEADER_BANKS = {"hdfc-bank": hdfc_bank_account_excel.HEADER_ROW,
+                                  "axis": axis_bank_account_excel.HEADER_ROW}
 
 csv_app = typer.Typer(
     help="Extract bank statement CSV exports (downloaded directly from "
@@ -608,8 +615,8 @@ def excel_extract_cmd(
             "may not fit this export's layout.[/yellow]")
         raise typer.Exit(1)
 
-    header_row = (hdfc_bank_account_excel.HEADER_ROW if bank == "hdfc-bank"
-                  else [f"Column {i + 1}" for i in range(len(rows[0]))])
+    header_row = _EXCEL_CANONICAL_HEADER_BANKS.get(
+        bank, [f"Column {i + 1}" for i in range(len(rows[0]))])
     final_rows = [header_row, *rows]
 
     out_path = out or file.with_suffix(".csv")
