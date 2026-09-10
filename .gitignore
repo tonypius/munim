@@ -10,3 +10,4 @@ venv/
 .munim/
 .claude/worktrees/
 .DS_Store
+.superpowers/
