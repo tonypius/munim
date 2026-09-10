@@ -579,18 +579,22 @@ async function dashboard(){
      <div class="rootv ${r==="Income"?"credit":r==="Expenses"?"debit":""}">${fmt(R[r],CUR)}</div></div>`
   ).join("")+`<div class="root"><div class="rootl">Net (In − Ex)</div>
      <div class="rootv ${d.net>=0?"credit":"debit"}">${fmt(d.net,CUR)}</div></div>`;
-  const nw=await api("/api/chart/balance");
-  if(nw.labels.length){
-    $("#dashNetWorth").innerHTML=`<canvas id="dashNetWorthCanvas" height="90"></canvas>`;
-    destroyChart(netWorthChart);
-    netWorthChart=new Chart($("#dashNetWorthCanvas"),{type:"line",
-      data:{labels:nw.labels,
-            datasets:[{data:nw.values,borderColor:cssVar("--pen-blue"),
-                       backgroundColor:cssVar("--pen-blue"),tension:0.15,fill:false}]},
-      options:{plugins:{legend:{display:false},
-                tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
-               scales:{y:{ticks:{callback:v=>fmt(v,CUR)}}}}});
-  } else {
+  try{
+    const nw=await api("/api/chart/balance");
+    if(nw.labels.length){
+      $("#dashNetWorth").innerHTML=`<canvas id="dashNetWorthCanvas" height="90"></canvas>`;
+      destroyChart(netWorthChart);
+      netWorthChart=new Chart($("#dashNetWorthCanvas"),{type:"line",
+        data:{labels:nw.labels,
+              datasets:[{data:nw.values,borderColor:cssVar("--pen-blue"),
+                         backgroundColor:cssVar("--pen-blue"),tension:0.15,fill:false}]},
+        options:{plugins:{legend:{display:false},
+                  tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
+                 scales:{y:{ticks:{callback:v=>fmt(v,CUR)}}}}});
+    } else {
+      $("#dashNetWorth").innerHTML=`<p class="empty">No accounts have an opening balance set yet — run <code>munim accounts set-opening-balance</code> to start tracking net worth.</p>`;
+    }
+  }catch(e){
     $("#dashNetWorth").innerHTML=`<p class="empty">No accounts have an opening balance set yet — run <code>munim accounts set-opening-balance</code> to start tracking net worth.</p>`;
   }
   if(!d.months.length){$("#dashStats").textContent="No spending matches these filters.";

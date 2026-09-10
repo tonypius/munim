@@ -33,11 +33,16 @@ def flow_query(
     otherwise (so a "top N" caller gets that ordering for free without a
     separate sort step).
 
-    `exclude_transfers=True` (the default) matches _dashboard()'s
-    existing spend calculation exactly (`t.direction == "debit" and not
-    t.is_transfer`) -- pass `exclude_transfers=False` for a caller that
-    genuinely wants transfers included (e.g. a raw account-activity
-    view). Raises ValueError for an unrecognized `group_by`.
+    `exclude_transfers=True` (the default) reproduces the
+    transfer-exclusion half of _dashboard()'s existing spend filter
+    (`not t.is_transfer`) -- pass `exclude_transfers=False` for a caller
+    that genuinely wants transfers included (e.g. a raw account-activity
+    view). This does NOT by itself reproduce _dashboard()'s full spend
+    calculation: `direction` defaults to "" (both debit and credit
+    summed together), so a caller wanting the full spend-only behavior
+    (`t.direction == "debit" and not t.is_transfer`) must also pass
+    `direction="debit"` explicitly. Raises ValueError for an
+    unrecognized `group_by`.
     """
     if group_by not in _VALID_GROUP_BY:
         raise ValueError(f"Unknown group_by {group_by!r}; expected one of {_VALID_GROUP_BY}")

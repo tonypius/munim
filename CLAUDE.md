@@ -138,8 +138,15 @@ When the user asks for a chart mid-conversation ("show my alcohol spend
 by month," "plot my Axis vs HDFC balance this year"), call
 `GET /api/chart/flow` or `GET /api/chart/balance` on the running web
 server (default `http://127.0.0.1:8646`) rather than hand-writing SQL —
-these endpoints already encode the transfer-exclusion and
-Assets-credit-grows/Liabilities-inverted sign conventions correctly.
+these endpoints already encode the transfer-exclusion convention
+correctly. Sign conventions differ, though: only `/api/chart/balance`
+(via `balance_series`) applies the Assets-credit-grows/Liabilities-inverted
+sign convention automatically. `/api/chart/flow` with no `direction`
+param sums `amount` across BOTH debit and credit — rarely what's
+wanted (e.g. a debit purchase and a credit refund in the same category
+would be added together instead of netting out) — so a spend query
+against `/api/chart/flow` MUST pass `&direction=debit` explicitly, and
+an income query needs `&direction=credit`.
 Render the returned `{"labels": [...], "values": [...]}` immediately via
 your own visualization tool, inline in the conversation. This is
 intentionally ephemeral: nothing is written back to munim's database or
