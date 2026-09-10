@@ -75,8 +75,8 @@ def test_flow_query_groups_by_account():
     ]
     rows = flow_query(txns, "account")
     assert rows == [
-        {"label": "hdfc", "value": 15.0},
         {"label": "sib", "value": 20.0},
+        {"label": "hdfc", "value": 15.0},
     ]
 
 
