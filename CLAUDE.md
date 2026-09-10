@@ -131,3 +131,19 @@ one-off patterns). Always verify a bulk confirm's `propagated` count
 didn't sweep in unrelated amounts (e.g. `SELECT amount, direction,
 COUNT(*) ... GROUP BY amount, direction` on the affected pattern) before
 considering the batch safe.
+
+## On-the-go conversational charts
+
+When the user asks for a chart mid-conversation ("show my alcohol spend
+by month," "plot my Axis vs HDFC balance this year"), call
+`GET /api/chart/flow` or `GET /api/chart/balance` on the running web
+server (default `http://127.0.0.1:8646`) rather than hand-writing SQL —
+these endpoints already encode the transfer-exclusion and
+Assets-credit-grows/Liabilities-inverted sign conventions correctly.
+Render the returned `{"labels": [...], "values": [...]}` immediately via
+your own visualization tool, inline in the conversation. This is
+intentionally ephemeral: nothing is written back to munim's database or
+web UI. See `docs/superpowers/specs/2026-09-10-chart-engine-design.md`
+if the user wants a chart to persist in the app instead — that's an
+explicit non-goal of the current implementation, a follow-up to design
+separately.

@@ -908,3 +908,124 @@ def test_pipeline_memory_still_outranks_purpose_keyword(tmp_path):
     Pipeline(store).run([t])
     assert t.category == "Family & Friends"
     assert t.stage == Stage.MEMORY_EXACT
+
+
+def test_chart_flow_endpoint_groups_by_month(tmp_path):
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("categories", ["Groceries"])
+    store.upsert_transactions([
+        Transaction(date="2026-06-01", amount=100, direction=Direction.DEBIT,
+                    description_raw="X", category="Groceries", subcategory="Alcohol"),
+        Transaction(date="2026-07-01", amount=200, direction=Direction.DEBIT,
+                    description_raw="Y", category="Groceries", subcategory="Alcohol"),
+    ])
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    get = lambda p: json.loads(urllib.request.urlopen(base + p, timeout=3).read())
+
+    d = get("/api/chart/flow?group_by=month&category=Groceries&subcategory=Alcohol")
+    assert d == {"labels": ["2026-06", "2026-07"], "values": [100.0, 200.0]}
+    srv.shutdown()
+
+
+def test_chart_flow_endpoint_excludes_transfers_by_default(tmp_path):
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("region", "in")
+    store.set_config("categories", ["Transfers", "Dining"])
+    store.upsert_transactions([
+        Transaction(date="2026-06-01", amount=999, direction=Direction.DEBIT,
+                    description_raw="CC PAYMENT", category="Transfers", is_transfer=True),
+        Transaction(date="2026-06-02", amount=50, direction=Direction.DEBIT,
+                    description_raw="LUNCH", category="Dining"),
+    ])
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/chart/flow?group_by=category", timeout=3).read())
+    assert d == {"labels": ["Dining"], "values": [50.0]}
+    srv.shutdown()
+
+
+def test_chart_flow_endpoint_rejects_unknown_group_by(tmp_path):
+    import threading
+    import urllib.request
+    import urllib.error
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/chart/flow?group_by=bogus", timeout=3)
+        assert False, "expected HTTPError"
+    except urllib.error.HTTPError as e:
+        assert e.code == 400
+    srv.shutdown()
+
+
+def test_chart_balance_endpoint_defaults_to_all_tracked_accounts(tmp_path):
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-06-01"}})
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/chart/balance", timeout=3).read())
+    assert d == {"labels": ["2026-06"], "values": [1000.0]}
+    srv.shutdown()
+
+
+def test_chart_balance_endpoint_accepts_comma_separated_accounts(tmp_path):
+    import json
+    import threading
+    import urllib.request
+    from http.server import HTTPServer
+    from munim.web.server import Handler
+
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances", {
+        "bank": {"balance": 1000.0, "as_of": "2026-06-01"},
+        "other": {"balance": 5000.0, "as_of": "2026-06-01"},
+    })
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.store = store
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    d = json.loads(urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/chart/balance?accounts=bank", timeout=3).read())
+    assert d == {"labels": ["2026-06"], "values": [1000.0]}
+    srv.shutdown()

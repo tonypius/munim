@@ -68,6 +68,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(self._transfers())
         elif route == "/api/dashboard":
             self._send(self._dashboard(q))
+        elif route == "/api/chart/flow":
+            self._handle_chart_flow(q)
+        elif route == "/api/chart/balance":
+            self._handle_chart_balance(q)
         elif route == "/api/contribute":
             candidates, skipped = collect_candidates(self.store)
             self._send({"candidates": candidates, "skipped": skipped})
@@ -247,6 +251,41 @@ class Handler(BaseHTTPRequestHandler):
                             subcategory=subcategory)
         n = self.store.apply_subcategory(pattern, subcategory, kind)
         self._send({"ok": True, "updated": n})
+
+    def _handle_chart_flow(self, q):
+        from ..reporting import flow_query
+        try:
+            rows = flow_query(
+                self.store.all_transactions(), q.get("group_by", ""),
+                direction=q.get("direction", ""),
+                exclude_transfers=q.get("exclude_transfers", "1") != "0",
+                account=q.get("account", ""),
+                category=q.get("category", ""),
+                subcategory=q.get("subcategory", ""),
+                date_from=q.get("date_from", ""),
+                date_to=q.get("date_to", ""),
+            )
+        except ValueError as e:
+            self._send({"error": str(e)}, status=400)
+            return
+        self._send({"labels": [r["label"] for r in rows],
+                    "values": [r["value"] for r in rows]})
+
+    def _handle_chart_balance(self, q):
+        from ..reporting import balance_series
+        accounts_param = q.get("accounts", "")
+        accounts = accounts_param.split(",") if accounts_param else None
+        try:
+            rows = balance_series(
+                self.store, accounts,
+                date_from=q.get("date_from", ""),
+                date_to=q.get("date_to", ""),
+            )
+        except ValueError as e:
+            self._send({"error": str(e)}, status=400)
+            return
+        self._send({"labels": [r["label"] for r in rows],
+                    "values": [r["value"] for r in rows]})
 
     def _handle_transfer_link(self):
         length = int(self.headers.get("Content-Length", 0))
