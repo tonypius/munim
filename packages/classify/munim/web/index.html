@@ -178,9 +178,13 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
 <section id="transfers">
   <h2>Settling accounts</h2>
   <p class="note">Debits and credits across your own accounts, paired up.
-  Auto-linked pairs are exact, unambiguous matches; the rest need your
-  pick. Dismiss a transfer that will genuinely never have a counterpart
-  (e.g. money sent to an untracked account) so it stops appearing here.</p>
+  Auto-linked pairs are exact, unambiguous matches. Ambiguous and pending
+  rows both let you pick a candidate and link by hand — pending rows just
+  didn't have one detected automatically (a different amount format, a
+  date more than a few days apart), so its picker lists every other
+  pending entry, closest amount first, not a verified match. Dismiss a
+  transfer that will genuinely never have a counterpart (e.g. money sent
+  to an untracked account) so it stops appearing here.</p>
   <div id="transfersMeta" class="note"></div>
   <div class="controls"><button id="relinkBtn" class="confirm">Re-run auto-link</button></div>
   <div id="transfersBody"></div>
@@ -706,12 +710,30 @@ function ambiguousRow(r){
     <td><button class="confirm linkBtn">Link</button> <button class="dismissBtn">Dismiss</button></td>
   </tr>`;
 }
-function pendingRow(r){
-  return `<tr data-id="${r.id}">
+function pendingCandidates(r,allPending,limit=30){
+  // No pre-computed candidate exists for a pending row (that's why it's
+  // pending, not ambiguous) -- so the picker draws from every OTHER
+  // pending row of the opposite direction, closest amount first, then
+  // closest date, so a real match is likely near the top of the list
+  // even though (unlike ambiguousRow's candidates) nothing here was
+  // actually verified to line up.
+  return allPending
+    .filter(p=>p.id!==r.id && p.direction!==r.direction)
+    .sort((a,b)=>Math.abs(a.amount-r.amount)-Math.abs(b.amount-r.amount)
+                 || Math.abs(new Date(a.date)-new Date(r.date))-Math.abs(new Date(b.date)-new Date(r.date)))
+    .slice(0,limit);
+}
+function pendingRow(r,allPending){
+  const cands=pendingCandidates(r,allPending);
+  const picker=cands.length
+    ? `<select>${cands.map(candOption).join("")}</select> <button class="confirm linkBtn">Link</button>`
+    : `<span class="note">no candidates</span>`;
+  return `<tr data-id="${r.id}" data-direction="${r.direction}">
     <td class="num">${r.date}</td>
     <td><div class="merchant">${esc(r.merchant)||"—"}</div><div class="raw">${esc(r.raw)}</div></td>
     ${amountCell(r)}
     <td class="merchant">${esc(r.account)}</td>
+    <td>${picker}</td>
     <td><button class="dismissBtn">Dismiss</button></td>
   </tr>`;
 }
@@ -724,8 +746,8 @@ async function transfers(){
   </tr></thead><tbody>`+d.ambiguous.map(ambiguousRow).join("")+`</tbody></table>`
     :`<p class="empty">Nothing ambiguous — the queue is empty.</p>`;
   const pendTable=d.pending.length?`<table><thead><tr>
-    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Account</th><th></th>
-  </tr></thead><tbody>`+d.pending.map(pendingRow).join("")+`</tbody></table>`
+    <th>Date</th><th>Entry</th><th class="num">Amount</th><th>Account</th><th>Candidate</th><th></th>
+  </tr></thead><tbody>`+d.pending.map(r=>pendingRow(r,d.pending)).join("")+`</tbody></table>`
     :`<p class="empty">Nothing pending — every transfer has a candidate or a decision.</p>`;
   $("#transfersBody").innerHTML=
     `<h2 style="font-size:16px">Ambiguous (${d.ambiguous.length})</h2>${ambTable}
@@ -736,8 +758,20 @@ $("#transfersBody").addEventListener("click", async e=>{
   const dismissBtn=e.target.closest(".dismissBtn");
   if(linkBtn){
     const tr=linkBtn.closest("tr");
-    const debit_id=tr.dataset.debit;
-    const credit_id=tr.querySelector("select").value;
+    const picked=tr.querySelector("select").value;
+    // ambiguousRow's <tr> always has data-debit (the row IS the debit,
+    // the select lists credit candidates). pendingRow's <tr> can be
+    // either side of the pair -- data-direction says which, so the
+    // picked option (always the opposite direction) slots into the
+    // other half.
+    let debit_id, credit_id;
+    if(tr.dataset.debit){
+      debit_id=tr.dataset.debit; credit_id=picked;
+    }else if(tr.dataset.direction==="debit"){
+      debit_id=tr.dataset.id; credit_id=picked;
+    }else{
+      debit_id=picked; credit_id=tr.dataset.id;
+    }
     linkBtn.disabled=true;
     try{
       await api("/api/transfer/link",{method:"POST",
