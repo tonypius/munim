@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
 from munim.schema import Transaction, Direction
 from munim.reporting import flow_query
+from munim.store import Store
+from munim.reporting import balance_series
 
 
 def _txn(date, amount, direction, **kw):
@@ -133,3 +135,105 @@ def test_flow_query_unknown_group_by_raises():
 
 def test_flow_query_empty_input_returns_empty_list():
     assert flow_query([], "month") == []
+
+
+def test_balance_series_single_asset_account_month_end_values(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-06-01"}})
+    store.upsert_transactions([
+        Transaction(date="2026-06-05", amount=500, direction=Direction.CREDIT,
+                    description_raw="SALARY", account="bank"),
+        Transaction(date="2026-07-10", amount=200, direction=Direction.DEBIT,
+                    description_raw="RENT", account="bank"),
+    ])
+    rows = balance_series(store, ["bank"])
+    assert rows == [
+        {"label": "2026-06", "value": 1500.0},
+        {"label": "2026-07", "value": 1300.0},
+    ]
+
+
+def test_balance_series_last_value_matches_compute_account_balance(tmp_path):
+    from munim.balance_sheet import compute_account_balance
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-06-01"}})
+    store.upsert_transactions([
+        Transaction(date="2026-06-05", amount=500, direction=Direction.CREDIT,
+                    description_raw="SALARY", account="bank"),
+    ])
+    rows = balance_series(store, ["bank"])
+    assert rows[-1]["value"] == compute_account_balance(store, "bank")
+
+
+def test_balance_series_combines_asset_and_negated_liability(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_types", {"cc": "Liabilities"})
+    store.set_config("account_opening_balances", {
+        "bank": {"balance": 1000.0, "as_of": "2026-06-01"},
+        "cc": {"balance": 200.0, "as_of": "2026-06-01"},
+    })
+    store.upsert_transactions([
+        Transaction(date="2026-06-05", amount=50, direction=Direction.DEBIT,
+                    description_raw="PURCHASE", account="cc"),
+    ])
+    rows = balance_series(store, ["bank", "cc"])
+    # bank: 1000 (no txns). cc: 200 + 50 (debit/purchase) = 250 owed, negated -> -250.
+    # combined: 1000 - 250 = 750.
+    assert rows == [{"label": "2026-06", "value": 750.0}]
+
+
+def test_balance_series_defaults_to_every_account_with_opening_balance(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances", {
+        "bank": {"balance": 1000.0, "as_of": "2026-06-01"},
+        "savings": {"balance": 500.0, "as_of": "2026-06-01"},
+    })
+    rows = balance_series(store)
+    assert rows == [{"label": "2026-06", "value": 1500.0}]
+
+
+def test_balance_series_excludes_account_with_no_opening_balance(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-06-01"}})
+    rows = balance_series(store, ["bank", "no-opening-balance-account"])
+    assert rows == [{"label": "2026-06", "value": 1000.0}]
+
+
+def test_balance_series_no_tracked_accounts_returns_empty(tmp_path):
+    store = Store(home=tmp_path)
+    assert balance_series(store, ["nonexistent"]) == []
+
+
+def test_balance_series_starts_at_latest_as_of_across_accounts(tmp_path):
+    """The combined series never reports a month before EVERY tracked
+    account has a known starting point -- an account with a later as_of
+    pulls the whole reported range's start forward, rather than showing
+    a partial/incomplete combined total for earlier months."""
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances", {
+        "old-account": {"balance": 100.0, "as_of": "2026-01-01"},
+        "new-account": {"balance": 200.0, "as_of": "2026-06-01"},
+    })
+    rows = balance_series(store, ["old-account", "new-account"])
+    assert rows[0]["label"] == "2026-06"
+
+
+def test_balance_series_respects_date_from_and_date_to(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                     {"bank": {"balance": 1000.0, "as_of": "2026-01-01"}})
+    store.upsert_transactions([
+        Transaction(date="2026-03-01", amount=100, direction=Direction.CREDIT,
+                    description_raw="X", account="bank"),
+    ])
+    rows = balance_series(store, ["bank"], date_from="2026-02-01", date_to="2026-02-28")
+    assert rows == [{"label": "2026-02", "value": 1000.0}]
+
+
+def test_balance_series_rejects_non_month_group_by(tmp_path):
+    store = Store(home=tmp_path)
+    with pytest.raises(ValueError, match="group_by"):
+        balance_series(store, ["bank"], group_by="year")
