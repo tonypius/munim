@@ -128,6 +128,21 @@ def test_flow_query_filters_by_date_range_inclusive():
     assert rows == [{"label": "2026-06", "value": 6.0}]
 
 
+def test_flow_query_excludes_given_txn_ids():
+    txns = [
+        _txn("2026-06-01", 100, Direction.DEBIT, category="Subscriptions", id="a"),
+        _txn("2026-06-02", 50, Direction.DEBIT, category="Subscriptions", id="b"),
+    ]
+    rows = flow_query(txns, "category", exclude_txn_ids=frozenset({"a"}))
+    assert rows == [{"label": "Subscriptions", "value": 50.0}]
+
+
+def test_flow_query_exclude_txn_ids_defaults_to_empty_set():
+    txns = [_txn("2026-06-01", 100, Direction.DEBIT, category="Subscriptions", id="a")]
+    rows = flow_query(txns, "category")
+    assert rows == [{"label": "Subscriptions", "value": 100.0}]
+
+
 def test_flow_query_unknown_group_by_raises():
     with pytest.raises(ValueError, match="group_by"):
         flow_query([], "not-a-real-dimension")

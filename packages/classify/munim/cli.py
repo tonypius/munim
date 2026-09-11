@@ -270,8 +270,11 @@ def report(month: str = typer.Option("", help="YYYY-MM, default: all"),
                                         help="Machine-readable output")):
     """Spending by category — single period or month-on-month trend."""
     store = _store()
+    business_ids = {txn_id for txn_id, tags in store.all_tags().items()
+                    if "business" in tags}
     txns = [t for t in store.all_transactions()
-            if not t.is_transfer and t.direction.value == "debit"]
+            if not t.is_transfer and t.direction.value == "debit"
+            and t.id not in business_ids]
     if month:
         txns = [t for t in txns if t.date.isoformat().startswith(month)]
     if not txns:

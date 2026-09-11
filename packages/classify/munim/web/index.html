@@ -61,7 +61,13 @@ tr:hover td{background:var(--paper-deep)}
 .subcat{color:var(--ink-soft);font-size:12.5px}
 .subcat select{font-size:12.5px;padding:2px 5px}
 .raw{color:var(--ink-soft);font:12px var(--mono);word-break:break-all}
-.controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.presetGroup{display:flex;gap:5px;flex-wrap:wrap}
+.preset{font:11px var(--mono);background:#fff;color:var(--ink-soft);
+  border:1px solid var(--rule-strong);border-radius:3px;padding:5px 9px;cursor:pointer}
+.preset:hover{color:var(--ink)}
+.preset.active{color:var(--pen-blue);border-color:var(--pen-blue)}
+.rangeSep{color:var(--ink-soft);font-size:13px}
 input,select{font:14px var(--mono);background:#fff;color:var(--ink);
   border:1px solid var(--rule-strong);border-radius:4px;padding:6px 9px}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--pen-blue);outline-offset:1px}
@@ -152,7 +158,17 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
 <section id="dashboard">
   <h2>The month's reckoning</h2>
   <div class="controls">
-    <select id="dMonth"><option value="">All months</option></select>
+    <div class="presetGroup" id="dPresets">
+      <button type="button" class="preset" data-preset="month">This month</button>
+      <button type="button" class="preset" data-preset="3m">Last 3 months</button>
+      <button type="button" class="preset" data-preset="6m">Last 6 months</button>
+      <button type="button" class="preset" data-preset="12m">Last 12 months</button>
+      <button type="button" class="preset" data-preset="ytd">YTD</button>
+      <button type="button" class="preset active" data-preset="all">All time</button>
+    </div>
+    <input type="date" id="dFrom" title="From">
+    <span class="rangeSep">to</span>
+    <input type="date" id="dTo" title="To">
     <select id="dAccount"><option value="">All accounts</option></select>
   </div>
   <div id="dashRoots" class="roots"></div>
@@ -160,6 +176,14 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <div id="dashMonths"></div>
   <h2 style="font-size:16px;margin-top:26px">Net worth over time</h2>
   <div id="dashNetWorth"></div>
+  <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:26px">
+    <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Income over time</h2><div id="dashIncome"></div></div>
+    <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Income vs Expense</h2><div id="dashIncomeExpense"></div></div>
+  </div>
+  <h2 style="font-size:16px;margin-top:26px">Category trend (top 5)</h2>
+  <div id="dashCatTrend"></div>
+  <h2 style="font-size:16px;margin-top:26px">Business spend over time</h2>
+  <div id="dashBusiness"></div>
   <div style="display:flex;gap:40px;flex-wrap:wrap;margin-top:26px">
     <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Heads of account</h2><div id="dashCats"></div></div>
     <div style="flex:1;min-width:300px"><h2 style="font-size:16px">Where the money goes</h2><div id="dashMerchants"></div></div>
@@ -197,6 +221,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   Tick several rows and assign one head at once to avoid repeated clicks.</p>
   <div class="controls">
     <select id="rMonth"><option value="">All months</option></select>
+    <select id="rDirection"><option value="">Debit &amp; credit</option><option value="debit">Debit only</option><option value="credit">Credit only</option></select>
     <select id="rSuggested"><option value="">All suggestions</option><option value="__none__">No suggestion</option></select>
     <select id="rAccount"><option value="">All accounts</option></select>
     <input id="rSearch" placeholder="Search merchant, category, raw text" size="34">
@@ -213,6 +238,7 @@ footer{margin-top:44px;border-top:1px solid var(--rule);padding-top:10px;
   <h2>The ledger</h2>
   <div class="controls">
     <select id="fMonth"><option value="">All months</option></select>
+    <select id="fDirection"><option value="">Debit &amp; credit</option><option value="debit">Debit only</option><option value="credit">Credit only</option></select>
     <select id="fCategory"><option value="">All heads</option><option value="__none__">No head</option></select>
     <select id="fSubcategory" hidden><option value="">All subcategories</option></select>
     <select id="fTag"><option value="">All tags</option></select>
@@ -257,10 +283,11 @@ These pages read the SQLite data contract; apps should too — not these URLs.</
 
 <script>
 const $=s=>document.querySelector(s);
+const $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=(n,c)=>`${c==="INR"?"₹":c+" "}${Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-let monthsChart,catsChart,merchantsChart,netWorthChart;
+let monthsChart,catsChart,merchantsChart,netWorthChart,incomeChart,incomeExpenseChart,catTrendChart,businessChart;
 const destroyChart=c=>{if(c)c.destroy()};
 let CATS=[],CUR="INR";
 
@@ -294,9 +321,10 @@ async function overview(){
 /* review */
 async function review(){
   const month=$("#rMonth")?.value||"", qtext=$("#rSearch")?.value||"",
-        suggested=$("#rSuggested")?.value||"", account=$("#rAccount")?.value||"";
-  const filtered=!!(month||qtext||suggested||account);
-  const params=new URLSearchParams({month,q:qtext,suggested,account});
+        suggested=$("#rSuggested")?.value||"", account=$("#rAccount")?.value||"",
+        direction=$("#rDirection")?.value||"";
+  const filtered=!!(month||qtext||suggested||account||direction);
+  const params=new URLSearchParams({month,q:qtext,suggested,account,direction});
   const {rows,months,suggestions,accounts}=await api(`/api/queue?${params}`);
   if($("#rMonth").options.length===1)
     months.forEach(m=>$("#rMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
@@ -336,6 +364,7 @@ function updateBulkBar(){
   $("#bulkCount").textContent=n===1?"1 selected":`${n} selected`;
 }
 $("#rMonth").addEventListener("change",review);
+$("#rDirection").addEventListener("change",review);
 $("#rSuggested").addEventListener("change",review);
 $("#rAccount").addEventListener("change",review);
 let rdeb;$("#rSearch").addEventListener("input",()=>{clearTimeout(rdeb);rdeb=setTimeout(review,250)});
@@ -410,9 +439,10 @@ function refreshSubcategoryFilter(){
 async function transactions(){
   if(!TAGS.length)await loadTags();
   const month=$("#fMonth").value,q=$("#fSearch").value,category=$("#fCategory").value,
-        subcategory=$("#fSubcategory").value,tag=$("#fTag").value,account=$("#fAccount").value;
+        subcategory=$("#fSubcategory").value,tag=$("#fTag").value,account=$("#fAccount").value,
+        direction=$("#fDirection").value;
   refreshSubcategoryFilter();
-  const params=new URLSearchParams({month,q,category,subcategory,tag,account});
+  const params=new URLSearchParams({month,q,category,subcategory,tag,account,direction});
   const d=await api(`/api/transactions?${params}`);
   if($("#fMonth").options.length===1)
     d.months.forEach(m=>$("#fMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
@@ -444,6 +474,7 @@ function updateTxnBulkBar(){
   $("#txnBulkCount").textContent=n===1?"1 selected":`${n} selected`;
 }
 $("#fMonth")?.addEventListener("change",transactions);
+$("#fDirection")?.addEventListener("change",transactions);
 $("#fCategory")?.addEventListener("change",transactions);
 $("#fSubcategory")?.addEventListener("change",transactions);
 $("#fTag")?.addEventListener("change",transactions);
@@ -570,13 +601,50 @@ async function contribute(){
 }
 
 /* dashboard */
+function isoDate(dt){
+  // Local date components, not toISOString() -- that converts to UTC and
+  // shifts local midnight back a day for any timezone ahead of UTC (e.g.
+  // IST), silently corrupting preset ranges by one day.
+  const y=dt.getFullYear(),m=String(dt.getMonth()+1).padStart(2,"0"),
+        day=String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+function presetRange(preset){
+  const now=new Date(),y=now.getFullYear(),m=now.getMonth();
+  const lastNMonths=n=>({from:isoDate(new Date(y,m-n+1,1)),to:isoDate(new Date(y,m+1,0))});
+  if(preset==="month")return lastNMonths(1);
+  if(preset==="3m")return lastNMonths(3);
+  if(preset==="6m")return lastNMonths(6);
+  if(preset==="12m")return lastNMonths(12);
+  if(preset==="ytd")return {from:isoDate(new Date(y,0,1)),to:isoDate(new Date(y,m+1,0))};
+  return {from:"",to:""}; // "all"
+}
+$("#dPresets").addEventListener("click",e=>{
+  const btn=e.target.closest(".preset");if(!btn)return;
+  $$("#dPresets .preset").forEach(b=>b.classList.toggle("active",b===btn));
+  const {from,to}=presetRange(btn.dataset.preset);
+  $("#dFrom").value=from;$("#dTo").value=to;
+  dashboard();
+});
+const clearActivePreset=()=>$$("#dPresets .preset").forEach(b=>b.classList.remove("active"));
+$("#dFrom").addEventListener("change",()=>{clearActivePreset();dashboard()});
+$("#dTo").addEventListener("change",()=>{clearActivePreset();dashboard()});
+function dashRange(){
+  return {date_from:$("#dFrom").value,date_to:$("#dTo").value,account:$("#dAccount").value};
+}
+function qs(params){
+  return Object.entries(params).filter(([,v])=>v)
+    .map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join("&");
+}
 async function dashboard(){
-  const month=$("#dMonth").value,account=$("#dAccount").value;
-  const d=await api(`/api/dashboard?month=${month}&account=${encodeURIComponent(account)}`);
-  if($("#dMonth").options.length===1)
-    d.filter_months.forEach(m=>$("#dMonth").insertAdjacentHTML("beforeend",`<option>${m}</option>`));
+  const range=dashRange();
+  const d=await api(`/api/dashboard?${qs(range)}`);
   if($("#dAccount").options.length===1)
     d.filter_accounts.forEach(a=>$("#dAccount").insertAdjacentHTML("beforeend",`<option>${esc(a)}</option>`));
+  if(d.date_min&&!$("#dFrom").min){
+    $("#dFrom").min=d.date_min;$("#dFrom").max=d.date_max;
+    $("#dTo").min=d.date_min;$("#dTo").max=d.date_max;
+  }
   const R=d.roots;
   $("#dashRoots").innerHTML=["Income","Expenses","Assets","Liabilities","Equity"].map(r=>
     `<div class="root"><div class="rootl">${r}</div>
@@ -584,7 +652,7 @@ async function dashboard(){
   ).join("")+`<div class="root"><div class="rootl">Net (In − Ex)</div>
      <div class="rootv ${d.net>=0?"credit":"debit"}">${fmt(d.net,CUR)}</div></div>`;
   try{
-    const nw=await api("/api/chart/balance");
+    const nw=await api(`/api/chart/balance?${qs({date_from:range.date_from,date_to:range.date_to})}`);
     if(nw.labels.length){
       $("#dashNetWorth").innerHTML=`<canvas id="dashNetWorthCanvas" height="90"></canvas>`;
       destroyChart(netWorthChart);
@@ -601,19 +669,6 @@ async function dashboard(){
   }catch(e){
     $("#dashNetWorth").innerHTML=`<p class="empty">No accounts have an opening balance set yet — run <code>munim accounts set-opening-balance</code> to start tracking net worth.</p>`;
   }
-  if(!d.months.length){$("#dashStats").textContent="No spending matches these filters.";
-    $("#dashMonths").innerHTML="";$("#dashCats").innerHTML="";$("#dashMerchants").innerHTML="";return}
-  $("#dashStats").innerHTML=`Spend <b>${fmt(d.total,CUR)}</b> ·
-    average month <b>${fmt(d.avg_month,CUR)}</b> ·
-    recurring commitments <b>${Math.round(d.recurring_share*100)}%</b> of spend`;
-  $("#dashMonths").innerHTML=`<canvas id="dashMonthsCanvas" height="90"></canvas>`;
-  destroyChart(monthsChart);
-  monthsChart=new Chart($("#dashMonthsCanvas"),{type:"bar",
-    data:{labels:d.months.map(m=>m.month),
-          datasets:[{data:d.months.map(m=>m.total),backgroundColor:cssVar("--ledger-red")}]},
-    options:{plugins:{legend:{display:false},
-              tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
-             scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
   const hbarChart=(containerId,rows,prevChart)=>{
     $(containerId).innerHTML=`<canvas id="${containerId.slice(1)}Canvas"></canvas>`;
     destroyChart(prevChart);
@@ -624,10 +679,99 @@ async function dashboard(){
                 tooltip:{callbacks:{label:c=>fmt(c.parsed.x,CUR)}}},
                scales:{x:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
   };
-  catsChart=hbarChart("#dashCats",d.top_categories,catsChart);
-  merchantsChart=hbarChart("#dashMerchants",d.top_merchants,merchantsChart);
+  if(!d.months.length){
+    $("#dashStats").textContent="No spending matches these filters.";
+    $("#dashMonths").innerHTML="";$("#dashCats").innerHTML="";$("#dashMerchants").innerHTML="";
+  } else {
+    $("#dashStats").innerHTML=`Spend <b>${fmt(d.total,CUR)}</b> ·
+      average month <b>${fmt(d.avg_month,CUR)}</b> ·
+      recurring commitments <b>${Math.round(d.recurring_share*100)}%</b> of spend`;
+    $("#dashMonths").innerHTML=`<canvas id="dashMonthsCanvas" height="90"></canvas>`;
+    destroyChart(monthsChart);
+    monthsChart=new Chart($("#dashMonthsCanvas"),{type:"bar",
+      data:{labels:d.months.map(m=>m.month),
+            datasets:[{data:d.months.map(m=>m.total),backgroundColor:cssVar("--ledger-red")}]},
+      options:{plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
+               scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
+    catsChart=hbarChart("#dashCats",d.top_categories,catsChart);
+    merchantsChart=hbarChart("#dashMerchants",d.top_merchants,merchantsChart);
+  }
+
+  /* income trend */
+  const income=await api(`/api/chart/flow?group_by=month&direction=credit&${qs(range)}`);
+  if(income.labels.length){
+    $("#dashIncome").innerHTML=`<canvas id="dashIncomeCanvas" height="140"></canvas>`;
+    destroyChart(incomeChart);
+    incomeChart=new Chart($("#dashIncomeCanvas"),{type:"bar",
+      data:{labels:income.labels,
+            datasets:[{data:income.values,backgroundColor:cssVar("--ink-green")}]},
+      options:{plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
+               scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
+  } else {
+    $("#dashIncome").innerHTML=`<p class="empty">No income in this range.</p>`;
+  }
+
+  /* income vs expense, same months as either series */
+  const expenseByMonth=Object.fromEntries(d.months.map(m=>[m.month,m.total]));
+  const incomeByMonth=Object.fromEntries(income.labels.map((l,i)=>[l,income.values[i]]));
+  const ieMonths=[...new Set([...d.months.map(m=>m.month),...income.labels])].sort();
+  if(ieMonths.length){
+    $("#dashIncomeExpense").innerHTML=`<canvas id="dashIncomeExpenseCanvas" height="140"></canvas>`;
+    destroyChart(incomeExpenseChart);
+    incomeExpenseChart=new Chart($("#dashIncomeExpenseCanvas"),{type:"bar",
+      data:{labels:ieMonths,
+            datasets:[
+              {label:"Income",data:ieMonths.map(m=>incomeByMonth[m]||0),backgroundColor:cssVar("--ink-green")},
+              {label:"Expense",data:ieMonths.map(m=>expenseByMonth[m]||0),backgroundColor:cssVar("--ledger-red")},
+            ]},
+      options:{plugins:{legend:{display:true},
+                tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y,CUR)}`}}},
+               scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
+  } else {
+    $("#dashIncomeExpense").innerHTML=`<p class="empty">No income or expense in this range.</p>`;
+  }
+
+  /* category trend, top 5 categories (excluding "(uncategorized)") */
+  const topCats=d.top_categories.map(c=>c.name).filter(n=>n!=="(uncategorized)").slice(0,5);
+  if(topCats.length){
+    const perCat=await Promise.all(topCats.map(cat=>
+      api(`/api/chart/flow?group_by=month&direction=debit&category=${encodeURIComponent(cat)}&${qs(range)}`)));
+    const catMonths=[...new Set(perCat.flatMap(r=>r.labels))].sort();
+    const palette=[cssVar("--ledger-red"),cssVar("--pen-blue"),cssVar("--ink-green"),"#b8860b","#7b3f9e"];
+    $("#dashCatTrend").innerHTML=`<canvas id="dashCatTrendCanvas" height="120"></canvas>`;
+    destroyChart(catTrendChart);
+    catTrendChart=new Chart($("#dashCatTrendCanvas"),{type:"line",
+      data:{labels:catMonths,
+            datasets:topCats.map((cat,i)=>{
+              const byMonth=Object.fromEntries(perCat[i].labels.map((l,j)=>[l,perCat[i].values[j]]));
+              return {label:cat,data:catMonths.map(m=>byMonth[m]||0),
+                      borderColor:palette[i%palette.length],
+                      backgroundColor:palette[i%palette.length],tension:0.15,fill:false};
+            })},
+      options:{plugins:{legend:{display:true},
+                tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y,CUR)}`}}},
+               scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
+  } else {
+    $("#dashCatTrend").innerHTML=`<p class="empty">No categorized spend in this range.</p>`;
+  }
+
+  /* business spend over time */
+  const biz=await api(`/api/chart/flow?group_by=month&direction=debit&only_business=1&${qs(range)}`);
+  if(biz.labels.length){
+    $("#dashBusiness").innerHTML=`<canvas id="dashBusinessCanvas" height="120"></canvas>`;
+    destroyChart(businessChart);
+    businessChart=new Chart($("#dashBusinessCanvas"),{type:"bar",
+      data:{labels:biz.labels,
+            datasets:[{data:biz.values,backgroundColor:cssVar("--pen-blue")}]},
+      options:{plugins:{legend:{display:false},
+                tooltip:{callbacks:{label:c=>fmt(c.parsed.y,CUR)}}},
+               scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v,CUR)}}}}});
+  } else {
+    $("#dashBusiness").innerHTML=`<p class="empty">No business-tagged spend in this range.</p>`;
+  }
 }
-$("#dMonth").addEventListener("change",dashboard);
 $("#dAccount").addEventListener("change",dashboard);
 
 /* accounts */

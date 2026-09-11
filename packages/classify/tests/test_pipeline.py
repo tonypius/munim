@@ -796,7 +796,7 @@ def test_dashboard_filters_and_roots(tmp_path):
     d = get("/api/dashboard")
     assert d["roots"]["Expenses"] == 100 and d["roots"]["Income"] == 5000
     assert d["net"] == 4900
-    d_june = get("/api/dashboard?month=2026-06")
+    d_june = get("/api/dashboard?date_from=2026-06-01&date_to=2026-06-30")
     assert d_june["roots"]["Income"] == 0 and d_june["total"] == 100
 
 

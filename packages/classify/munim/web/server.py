@@ -252,13 +252,34 @@ class Handler(BaseHTTPRequestHandler):
         n = self.store.apply_subcategory(pattern, subcategory, kind)
         self._send({"ok": True, "updated": n})
 
+    def _business_txn_ids(self) -> frozenset[str]:
+        """Ids of every transaction tagged 'business' -- reimbursed spend
+        that's excluded from personal spend/income totals the same way
+        is_transfer already is (real money moved, but it nets against a
+        reimbursement rather than being personal spend/income). One bulk
+        query, not one per transaction."""
+        return frozenset(
+            txn_id for txn_id, tags in self.store.all_tags().items()
+            if "business" in tags
+        )
+
     def _handle_chart_flow(self, q):
         from ..reporting import flow_query
+        only_business = q.get("only_business", "0") == "1"
+        exclude_business = q.get("exclude_business", "1") != "0"
+        txns = self.store.all_transactions()
+        exclude_txn_ids: frozenset[str] = frozenset()
+        if only_business:
+            business_ids = self._business_txn_ids()
+            txns = [t for t in txns if t.id in business_ids]
+        elif exclude_business:
+            exclude_txn_ids = self._business_txn_ids()
         try:
             rows = flow_query(
-                self.store.all_transactions(), q.get("group_by", ""),
+                txns, q.get("group_by", ""),
                 direction=q.get("direction", ""),
                 exclude_transfers=q.get("exclude_transfers", "1") != "0",
+                exclude_txn_ids=exclude_txn_ids,
                 account=q.get("account", ""),
                 category=q.get("category", ""),
                 subcategory=q.get("subcategory", ""),
@@ -381,12 +402,15 @@ class Handler(BaseHTTPRequestHandler):
         subcategory = q.get("subcategory", "")
         tag = q.get("tag", "")
         account = q.get("account", "")
+        direction = q.get("direction", "")
         all_txns = self.store.all_transactions()
         all_tags = self.store.all_tags()
         rows = []
         for t in sorted(all_txns, key=lambda x: x.date, reverse=True):
             iso = t.date.isoformat()
             if month and not iso.startswith(month):
+                continue
+            if direction and t.direction.value != direction:
                 continue
             if category == "__none__" and t.category:
                 continue
@@ -422,12 +446,15 @@ class Handler(BaseHTTPRequestHandler):
         month, needle = q.get("month", ""), q.get("q", "").upper()
         suggested = q.get("suggested", "")
         account = q.get("account", "")
-        filtered = bool(month or needle or suggested or account)
+        direction = q.get("direction", "")
+        filtered = bool(month or needle or suggested or account or direction)
         limit = 500 if filtered else 100
         queue = self.store.review_queue()
         rows = []
         for t in queue:
             if month and not t.date.isoformat().startswith(month):
+                continue
+            if direction and t.direction.value != direction:
                 continue
             if suggested == "__none__" and t.category:
                 continue
@@ -606,20 +633,28 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _dashboard(self, q=None):
+        from datetime import date as Date
         from ..tree import get_tree, resolve, root_of
         q = q or {}
-        month, account = q.get("month", ""), q.get("account", "")
-        all_txns = [t for t in self.store.all_transactions()
-                    if (not month or t.date.isoformat().startswith(month))
+        date_from, date_to = q.get("date_from", ""), q.get("date_to", "")
+        account = q.get("account", "")
+        d_from = Date.fromisoformat(date_from) if date_from else None
+        d_to = Date.fromisoformat(date_to) if date_to else None
+        business_ids = self._business_txn_ids()
+        every_txn = self.store.all_transactions()
+        all_txns = [t for t in every_txn
+                    if (not d_from or t.date >= d_from)
+                    and (not d_to or t.date <= d_to)
                     and (not account or t.account == account)]
         # five-root rollup: every categorized entry flows to its root
         tree = get_tree(self.store)
         roots: dict[str, float] = defaultdict(float)
         for t in all_txns:
-            if t.category:
+            if t.category and t.id not in business_ids:
                 roots[root_of(resolve(tree, t.category))] += t.amount
         spend = [t for t in all_txns
-                 if t.direction.value == "debit" and not t.is_transfer]
+                 if t.direction.value == "debit" and not t.is_transfer
+                 and t.id not in business_ids]
         months: dict[str, float] = defaultdict(float)
         cats: dict[str, float] = defaultdict(float)
         merchants: dict[str, float] = defaultdict(float)
@@ -631,6 +666,7 @@ class Handler(BaseHTTPRequestHandler):
             if t.is_recurring:
                 recurring += t.amount
         total = sum(months.values())
+        all_dates = [t.date for t in every_txn]
         return {
             "months": [{"month": m, "total": v}
                        for m, v in sorted(months.items())],
@@ -646,11 +682,9 @@ class Handler(BaseHTTPRequestHandler):
             "roots": {r: roots.get(r, 0.0) for r in
                       ("Income", "Expenses", "Assets", "Liabilities", "Equity")},
             "net": roots.get("Income", 0.0) - roots.get("Expenses", 0.0),
-            "filter_months": sorted({t.date.isoformat()[:7]
-                                     for t in self.store.all_transactions()},
-                                    reverse=True),
-            "filter_accounts": sorted({t.account
-                                       for t in self.store.all_transactions()}),
+            "date_min": min(all_dates).isoformat() if all_dates else "",
+            "date_max": max(all_dates).isoformat() if all_dates else "",
+            "filter_accounts": sorted({t.account for t in every_txn}),
         }
 
     @staticmethod

@@ -21,6 +21,7 @@ def flow_query(
     *,
     direction: str = "",
     exclude_transfers: bool = True,
+    exclude_txn_ids: frozenset[str] = frozenset(),
     account: str = "",
     category: str = "",
     subcategory: str = "",
@@ -43,6 +44,13 @@ def flow_query(
     (`t.direction == "debit" and not t.is_transfer`) must also pass
     `direction="debit"` explicitly. Raises ValueError for an
     unrecognized `group_by`.
+
+    `exclude_txn_ids` drops specific transactions by id regardless of any
+    other filter -- this is how a caller excludes tagged transactions
+    (e.g. reimbursed business spend) from a spend/income total, since
+    tags live outside the Transaction object itself and this function
+    stays tag-agnostic. Pass the caller's own `store.all_tags()`-derived
+    id set; an empty set (the default) excludes nothing.
     """
     if group_by not in _VALID_GROUP_BY:
         raise ValueError(f"Unknown group_by {group_by!r}; expected one of {_VALID_GROUP_BY}")
@@ -53,6 +61,8 @@ def flow_query(
     totals: dict[str, float] = defaultdict(float)
     for t in txns:
         if exclude_transfers and t.is_transfer:
+            continue
+        if t.id in exclude_txn_ids:
             continue
         if direction and t.direction.value != direction:
             continue
