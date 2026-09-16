@@ -110,3 +110,32 @@ def test_dashboard_excludes_business_tagged_from_net_roots(tmp_path):
         assert d["net"] == -500.0
     finally:
         srv.shutdown()
+
+
+def test_categories_excludes_business_tagged_from_usage_totals(tmp_path):
+    store = _seed(tmp_path)
+    srv, port = _server(store)
+    try:
+        d = _get(port, "/api/categories")
+        # b1 (Subscriptions, business-tagged) must not count toward usage;
+        # only p1's 500 should show.
+        assert d["usage"]["Subscriptions"] == {"n": 1, "total": 500.0}
+        # b2 (Income, business-tagged) leaves Income with no usage at all --
+        # excluded before it's ever added, so the key isn't present.
+        assert d["usage"].get("Income", {"n": 0, "total": 0.0}) == {"n": 0, "total": 0.0}
+    finally:
+        srv.shutdown()
+
+
+def test_accounts_excludes_business_tagged_from_debit_credit_totals(tmp_path):
+    store = _seed(tmp_path)
+    srv, port = _server(store)
+    try:
+        d = _get(port, "/api/accounts")
+        row = next(r for r in d["rows"] if r["account"] == "cc")
+        # b1 (debit, business-tagged) excluded -> only p1's 500 debit.
+        # b2 (credit, business-tagged) excluded -> 0 credit.
+        assert row["debit"] == 500.0
+        assert row["credit"] == 0.0
+    finally:
+        srv.shutdown()

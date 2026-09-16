@@ -904,6 +904,9 @@ def export(
     out: Path = typer.Option(None, help="Output file (default: stdout-friendly name)"),
     fmt: str = typer.Option("csv", "--format",
                             help="csv | jsonl | ledger | firefly"),
+    include_business: bool = typer.Option(False, "--include-business",
+        help="Include 'business'-tagged (reimbursed) transactions, "
+             "excluded by default the same way `report` excludes them"),
 ):
     """Hand your categorized data to the tools that do budgeting and trends.
 
@@ -913,6 +916,10 @@ def export(
     from . import export_formats as ef
     store = _store()
     txns = store.all_transactions()
+    if not include_business:
+        business_ids = {txn_id for txn_id, tags in store.all_tags().items()
+                        if "business" in tags}
+        txns = [t for t in txns if t.id not in business_ids]
     if not txns:
         console.print("Nothing to export.")
         raise typer.Exit(1)

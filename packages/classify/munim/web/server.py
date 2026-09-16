@@ -479,6 +479,7 @@ class Handler(BaseHTTPRequestHandler):
         cats = self.store.get_config("categories", [])
         usage: dict[str, dict] = defaultdict(lambda: {"n": 0, "total": 0.0})
         subcat_usage: dict[str, dict] = defaultdict(dict)
+        business_ids = self._business_txn_ids()
         for t in self.store.all_transactions():
             # No direction filter (a credit-side category like Income or
             # Investments is just as real as a debit-side one) and no
@@ -486,9 +487,10 @@ class Handler(BaseHTTPRequestHandler):
             # is_transfer=True by design, so excluding it here made that
             # row permanently show zero regardless of real activity) --
             # this mirrors _dashboard's own root-rollup, which filters on
-            # neither and only excludes transfers from its separate,
-            # deliberately spend-only breakdown.
-            if t.category:
+            # neither, excludes business-tagged rows the same way, and
+            # only excludes transfers from its separate, deliberately
+            # spend-only breakdown.
+            if t.category and t.id not in business_ids:
                 usage[t.category]["n"] += 1
                 usage[t.category]["total"] += t.amount
                 if t.subcategory:
@@ -545,6 +547,7 @@ class Handler(BaseHTTPRequestHandler):
         from ..doctor import _month_range
         from ..tree import account_root
         from ..balance_sheet import compute_account_balance
+        business_ids = self._business_txn_ids()
         by_acct: dict[str, list] = defaultdict(list)
         for t in self.store.all_transactions():
             by_acct[t.account].append(t)
@@ -576,9 +579,11 @@ class Handler(BaseHTTPRequestHandler):
                     "account": acct, "type": acct_type, "n": len(ts),
                     "first": dates[0].isoformat(), "last": dates[-1].isoformat(),
                     "debit": sum(t.amount for t in ts
-                                if t.direction.value == "debit" and not t.is_transfer),
+                                if t.direction.value == "debit" and not t.is_transfer
+                                and t.id not in business_ids),
                     "credit": sum(t.amount for t in ts
-                                 if t.direction.value == "credit" and not t.is_transfer),
+                                 if t.direction.value == "credit" and not t.is_transfer
+                                 and t.id not in business_ids),
                     "transfers": sum(1 for t in ts if t.is_transfer),
                     "months": len(have), "missing_months": missing,
                 }
