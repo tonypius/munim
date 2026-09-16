@@ -6,8 +6,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
+
 from munim_ingest.voucher_parse import (
     parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart,
+    UnrecognizedGyftrBrand,
 )
 
 
@@ -51,11 +54,18 @@ def test_parse_gyftr_extracts_brand_value_code_and_date():
     }
 
 
-def test_parse_gyftr_returns_none_for_unrecognized_brand():
+def test_parse_gyftr_raises_for_unrecognized_brand():
+    # A genuine GYFTR purchase-confirmation email (has both Value and
+    # E-Gift Card Code) but a product line not in GYFTR_BRAND_MAP must
+    # be distinguishable from "not a GYFTR email at all" -- silently
+    # returning None here would make it indistinguishable from that case
+    # and this brand would be dropped with zero user-visible signal.
     raw = _msg("Your Gift Voucher", "GyFTR <gifts@gyftr.com>",
                "Mon, 14 Sep 2026 14:09:00 +0530",
                GYFTR_BODY.replace("Swiggy Money Voucher", "Bata Voucher"))
-    assert parse_gyftr(raw) is None
+    with pytest.raises(UnrecognizedGyftrBrand) as exc_info:
+        parse_gyftr(raw)
+    assert "Bata Voucher" in exc_info.value.product_text
 
 
 AMAZONPAY_BODY = """Hi Tony,

@@ -77,5 +77,34 @@ def test_fetch_vouchers_skips_unparseable_messages(tmp_path, monkeypatch):
                   "--out", str(out_file)])
 
     assert result.exit_code == 0, result.output
-    assert "0" in result.output
+    assert "0 voucher record(s) found" in result.output
+    assert not out_file.exists() or out_file.read_text().strip() == ""
+
+
+def test_fetch_vouchers_warns_and_counts_unrecognized_gyftr_brand(tmp_path, monkeypatch):
+    # A genuine GYFTR purchase email with a brand not in GYFTR_BRAND_MAP
+    # must be distinguishable from "not a voucher email at all" -- it
+    # should print a warning naming the unmatched product line and be
+    # called out separately in the summary, not just silently produce 0
+    # records indistinguishable from an inbox with no voucher mail.
+    monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
+    fake_conn = MagicMock()
+    bata_raw = _msg(
+        "Your Gift Voucher", "GyFTR <gifts@gyftr.com>",
+        "Mon, 14 Sep 2026 14:09:00 +0530",
+        GYFTR_BODY.replace("Swiggy Money Voucher", "Bata Voucher"))
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1"]), \
+         patch("munim_ingest.cli.getpass.getpass", return_value="fake-app-password"):
+        fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", bata_raw)])
+        out_file = tmp_path / "vouchers.jsonl"
+        result = runner.invoke(
+            app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
+                  "--out", str(out_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "Bata Voucher" in result.output
+    assert "unrecognized" in result.output.lower()
+    assert "0 voucher record(s) found" in result.output
     assert not out_file.exists() or out_file.read_text().strip() == ""

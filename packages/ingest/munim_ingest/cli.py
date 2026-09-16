@@ -27,7 +27,10 @@ from .pdf_extract import (
     PdfPasswordError, extract_all_text, extract_rows, filter_transaction_rows, open_pdf,
 )
 from .voucher_packs import GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FROM
-from .voucher_parse import parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart
+from .voucher_parse import (
+    parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart,
+    UnrecognizedGyftrBrand,
+)
 
 def _is_hdfc_v2_layout(rows):
     """The newer HDFC template (a card-number upgrade on the same
@@ -329,6 +332,7 @@ def gmail_fetch_vouchers(
 
     out_file = out or (DEFAULT_HOME / "vouchers.jsonl")
     records = []
+    unrecognized_brands = 0
     try:
         all_domains = [d for d, _ in _VOUCHER_SENDERS]
         uids = search_uids(conn, mailbox, all_domains, since=since_date)
@@ -345,7 +349,20 @@ def gmail_fetch_vouchers(
                     continue
                 raw = item[1]
                 for _domain, parser in _VOUCHER_SENDERS:
-                    record = parser(raw)
+                    try:
+                        record = parser(raw)
+                    except UnrecognizedGyftrBrand as e:
+                        # A genuine GYFTR voucher-purchase email whose
+                        # product line isn't in GYFTR_BRAND_MAP yet --
+                        # per the design, this must be skipped and
+                        # logged, never silently dropped or guessed.
+                        console.print(
+                            f"[yellow]Skipping a GYFTR voucher: unrecognized "
+                            f"product line '{escape(e.product_text)}' -- add "
+                            f"it to GYFTR_BRAND_MAP in voucher_packs.py to "
+                            f"support this brand.[/yellow]")
+                        unrecognized_brands += 1
+                        record = None
                     if record is not None:
                         records.append(record)
                         break
@@ -371,6 +388,12 @@ def gmail_fetch_vouchers(
         console.print(f"[green]{len(records)}[/green] voucher record(s) written to {escape(str(out_file))}.")
     else:
         console.print("[bold]0[/bold] voucher record(s) found.")
+    if unrecognized_brands:
+        console.print(
+            f"[yellow]{unrecognized_brands}[/yellow] GYFTR voucher email(s) "
+            f"skipped due to an unrecognized product line -- see warning(s) "
+            f"above; that many fewer records were written than candidate "
+            f"messages found.")
 
 
 @pdf_app.command("extract")
