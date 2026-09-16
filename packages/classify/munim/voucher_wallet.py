@@ -58,3 +58,78 @@ def import_purchase(store: Store, record: dict) -> str:
         store.link_transfer(candidates[0].id, txn.id, confidence="auto")
 
     return txn.id
+
+
+# Payment-rail strings confirmed to mean "a real bank transaction already
+# covers this" -- matched case-insensitively against a spend record's
+# paid_via. Anything else (a voucher/wallet-branded value, or None) falls
+# through to the bank cross-check below, which is the authoritative
+# signal either way (per the user: "there will be an HDFC transaction if
+# paid by card, else it'll be using GYFTR coupons").
+KNOWN_REAL_PAYMENT_RAILS = {"credit/debit card", "credit card", "debit card",
+                            "upi", "netbanking"}
+
+# category is deterministic for these two sources -- Swiggy/Instamart
+# order emails don't carry enough merchant detail for the normal
+# classification pipeline to do better than guess. Amazon Pay's merchant
+# varies too widely for a fixed category, so it goes through Pipeline
+# instead (see import_spend).
+FIXED_CATEGORY_BY_SOURCE = {"swiggy_order": "Dining", "instamart_order": "Groceries"}
+
+# Date-window for deciding a spend record already has a matching real
+# bank transaction -- covers order-date vs. settlement-date lag.
+BANK_MATCH_WINDOW_DAYS = 2
+
+
+def _has_matching_bank_txn(store: Store, amount: float, when: date,
+                           window_days: int = BANK_MATCH_WINDOW_DAYS) -> bool:
+    return any(
+        t.direction == Direction.DEBIT
+        and not t.account.startswith("voucher-")
+        and abs(t.amount - amount) < 0.01
+        and abs((t.date - when).days) <= window_days
+        for t in store.all_transactions()
+    )
+
+
+def import_spend(store: Store, record: dict) -> str | None:
+    """record: {"kind": "spend", "brand": str, "source": str,
+    "amount": float, "merchant": str, "order_id": str, "order_date":
+    date, "paid_via": str | None}. Returns the created transaction id,
+    or None if this spend is already covered by a real bank transaction
+    (skipped, nothing created)."""
+    paid_via = (record.get("paid_via") or "").strip().lower()
+    if paid_via in KNOWN_REAL_PAYMENT_RAILS:
+        return None
+    if _has_matching_bank_txn(store, record["amount"], record["order_date"]):
+        return None
+
+    account = f"voucher-{record['brand']}"
+    txn = Transaction(
+        id=f"voucher-redemption-{record['order_id']}",
+        date=record["order_date"],
+        amount=record["amount"],
+        direction=Direction.DEBIT,
+        # description_raw is the bare merchant name, not an annotated
+        # string like "Zomato (via ... voucher)" -- for the Amazon Pay
+        # case this text goes straight through Pipeline/Normalizer, which
+        # expects real-narration-shaped input, and annotation text risks
+        # polluting the extracted merchant_norm so an existing "ZOMATO"
+        # memory rule no longer matches. The voucher-<brand> account
+        # already conveys "this was a voucher redemption" on its own.
+        description_raw=record["merchant"],
+        account=account,
+    )
+
+    fixed_category = FIXED_CATEGORY_BY_SOURCE.get(record["source"])
+    if fixed_category:
+        txn.category = fixed_category
+        txn.stage = Stage.STRUCTURAL
+        txn.confidence = 1.0
+        txn.status = Status.PROVISIONAL
+    else:
+        from .pipeline import Pipeline
+        Pipeline(store).run([txn])
+
+    store.upsert_transactions([txn])
+    return txn.id
