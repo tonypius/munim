@@ -133,3 +133,36 @@ def import_spend(store: Store, record: dict) -> str | None:
 
     store.upsert_transactions([txn])
     return txn.id
+
+
+def recheck(store: Store) -> dict:
+    """Deletes every existing synthetic transaction on voucher-<brand>
+    accounts, then replays the full voucher_records log (persisted by
+    `munim vouchers import`) from scratch against the CURRENT set of
+    real bank transactions. Safe to run any time -- corrects any earlier
+    "no matching bank transaction, must be voucher-funded" guess that
+    was only true because that period's bank statement hadn't been
+    imported yet when the guess was originally made.
+
+    Returns {"checked": len(voucher_records), "removed_existing": N,
+    "created": N} -- created counts new/recreated transactions across
+    both purchases and non-skipped redemptions."""
+    removed_existing = 0
+    for t in store.all_transactions():
+        if t.account.startswith("voucher-"):
+            store.delete_transaction(t.id)
+            removed_existing += 1
+
+    records = store.get_config("voucher_records", []) or []
+    created = 0
+    for record in records:
+        if record["kind"] == "purchase":
+            live_record = {**record, "purchased_at": date.fromisoformat(record["purchased_at"])}
+            import_purchase(store, live_record)
+            created += 1
+        else:
+            live_record = {**record, "order_date": date.fromisoformat(record["order_date"])}
+            if import_spend(store, live_record) is not None:
+                created += 1
+
+    return {"checked": len(records), "removed_existing": removed_existing, "created": created}

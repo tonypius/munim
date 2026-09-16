@@ -1245,5 +1245,19 @@ def vouchers_import(file: Path = typer.Argument(..., exists=True,
                   f"[dim]{skipped}[/dim] already covered by a real transaction.")
 
 
+@vouchers_app.command("recheck")
+def vouchers_recheck():
+    """Re-evaluate every voucher redemption against current bank data,
+    removing any that a later-imported bank statement now shows was
+    actually card-paid all along."""
+    from .voucher_wallet import recheck as recheck_wallet
+    store = _store()
+    result = recheck_wallet(store)
+    console.print(f"[green]{result['checked']}[/green] record(s) replayed, "
+                  f"[yellow]{result['removed_existing']}[/yellow] prior "
+                  f"synthetic transaction(s) cleared, "
+                  f"[green]{result['created']}[/green] recreated as still-genuine.")
+
+
 if __name__ == "__main__":
     app()
