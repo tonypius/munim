@@ -160,6 +160,18 @@ class Store:
         )
         self.db.commit()
 
+    def delete_transaction(self, txn_id: str) -> None:
+        """Removes a transaction and any tags/transfer_links rows that
+        reference it, so no orphaned references remain. A no-op if
+        txn_id doesn't exist. Used by the voucher-wallet recheck pass to
+        safely regenerate synthetic redemption transactions."""
+        self.db.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
+        self.db.execute("DELETE FROM tags WHERE txn_id=?", (txn_id,))
+        self.db.execute(
+            "DELETE FROM transfer_links WHERE txn_id_a=? OR txn_id_b=?",
+            (txn_id, txn_id))
+        self.db.commit()
+
     def _row_to_txn(self, r: sqlite3.Row) -> Transaction:
         return Transaction(
             id=r["id"], date=r["date"], amount=r["amount"], currency=r["currency"],
