@@ -42,8 +42,19 @@ def _text_body(msg) -> str:
     return text
 
 
-def _header_date(msg) -> date:
-    return parsedate_to_datetime(msg["Date"]).date()
+def _header_date(msg) -> date | None:
+    """Parse the message's Date header, returning None (never raising)
+    if it's missing or malformed -- callers must check for None before
+    building a record, since a matching sender/body with no usable
+    Date header should still fall through to "no match" rather than
+    blow up the caller."""
+    header = msg["Date"]
+    if not header:
+        return None
+    try:
+        return parsedate_to_datetime(header).date()
+    except (TypeError, ValueError):
+        return None
 
 
 def _amount(text: str, label: str) -> float | None:
@@ -63,11 +74,12 @@ def parse_gyftr(raw_email: bytes) -> dict | None:
         return None
     value = _amount(text, "Value")
     code_match = re.search(r"E-Gift Card Code\s*\n\s*(\S+)", text)
-    if value is None or not code_match:
+    purchased_at = _header_date(msg)
+    if value is None or not code_match or purchased_at is None:
         return None
     return {
         "kind": "purchase", "brand": brand, "value": value,
-        "code": code_match.group(1), "purchased_at": _header_date(msg),
+        "code": code_match.group(1), "purchased_at": purchased_at,
     }
 
 
@@ -107,13 +119,14 @@ def parse_swiggy(raw_email: bytes) -> dict | None:
         r"Restaurant icon\s*\n\s*Restaurant icon\s*\n+([^\n]+)", text)
     paid_via_match = re.search(
         r"Paid Via\s+([^\t\n₹]+?)\s*\t*\s*(?:Rs|₹)?\s*([\d,]+(?:\.\d+)?)", text)
-    if not (order_id_match and restaurant_match and paid_via_match):
+    order_date = _header_date(msg)
+    if not (order_id_match and restaurant_match and paid_via_match) or order_date is None:
         return None
     return {
         "kind": "spend", "brand": "swiggy", "source": "swiggy_order",
         "amount": float(paid_via_match.group(2).replace(",", "")),
         "merchant": restaurant_match.group(1).strip(),
-        "order_id": order_id_match.group(1), "order_date": _header_date(msg),
+        "order_id": order_id_match.group(1), "order_date": order_date,
         "paid_via": paid_via_match.group(1).strip(),
     }
 
@@ -125,11 +138,12 @@ def parse_instamart(raw_email: bytes) -> dict | None:
     text = _text_body(msg)
     order_id_match = re.search(r"order id:\s*(\d+)", text, re.I)
     grand_total = _amount(text, "Grand Total")
-    if not order_id_match or grand_total is None:
+    order_date = _header_date(msg)
+    if not order_id_match or grand_total is None or order_date is None:
         return None
     return {
         "kind": "spend", "brand": "swiggy", "source": "instamart_order",
         "amount": grand_total, "merchant": "Instamart",
-        "order_id": order_id_match.group(1), "order_date": _header_date(msg),
+        "order_id": order_id_match.group(1), "order_date": order_date,
         "paid_via": None,
     }
