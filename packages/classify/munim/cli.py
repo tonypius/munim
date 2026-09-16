@@ -18,6 +18,7 @@ from .store import Store
 from .pipeline import Pipeline
 from .ingest import load_csv, CsvProfile
 from .fallback import SKLEARN_AVAILABLE
+from .voucher_wallet import import_purchase, import_spend
 
 app = typer.Typer(help="Munim — a local bookkeeper that learns from you.",
                   no_args_is_help=True, add_completion=False)
@@ -1186,6 +1187,62 @@ def balance_sheet():
     console.print(f"\n[bold]Net worth: {total_assets - total_liabilities:,.2f}"
                   f"[/bold]  [dim]({counted}/{len(accounts)} accounts have a "
                   "starting point)[/dim]")
+
+
+# ---------------------------------------------------------------- vouchers
+vouchers_app = typer.Typer(help="Import voucher purchase/redemption records fetched via munim-ingest gmail fetch-vouchers.")
+app.add_typer(vouchers_app, name="vouchers")
+
+
+def _record_key(record: dict) -> str:
+    """The natural identifier a record log entry is deduplicated by --
+    matches the id scheme import_purchase/import_spend use, so a record
+    already present in voucher_records (by this key) is never appended
+    twice even if the same source file is imported again."""
+    if record["kind"] == "purchase":
+        return f"purchase-{record['code']}"
+    return f"spend-{record['order_id']}"
+
+
+@vouchers_app.command("import")
+def vouchers_import(file: Path = typer.Argument(..., exists=True,
+        help="JSONL file from munim-ingest gmail fetch-vouchers")):
+    """Turn fetched voucher records into transactions on voucher-<brand>
+    virtual accounts, linking purchases to their funding card debit and
+    creating redemption debits for spend not already covered by a real
+    bank transaction."""
+    from datetime import date as date_cls
+    store = _store()
+    existing_records = store.get_config("voucher_records", []) or []
+    existing_keys = {_record_key(r) for r in existing_records}
+
+    purchased = created = skipped = 0
+    new_records = []
+    for line in file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        if record["kind"] == "purchase":
+            live_record = {**record, "purchased_at": date_cls.fromisoformat(record["purchased_at"])}
+            import_purchase(store, live_record)
+            purchased += 1
+        else:
+            live_record = {**record, "order_date": date_cls.fromisoformat(record["order_date"])}
+            if import_spend(store, live_record) is not None:
+                created += 1
+            else:
+                skipped += 1
+        if _record_key(record) not in existing_keys:
+            new_records.append(record)
+            existing_keys.add(_record_key(record))
+
+    if new_records:
+        store.set_config("voucher_records", existing_records + new_records)
+
+    console.print(f"[green]{purchased}[/green] voucher purchase(s) recorded, "
+                  f"[green]{created}[/green] redemption(s) created, "
+                  f"[dim]{skipped}[/dim] already covered by a real transaction.")
 
 
 if __name__ == "__main__":
