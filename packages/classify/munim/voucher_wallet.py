@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from .pipeline import Pipeline
 from .schema import Direction, Stage, Status, Transaction
 from .store import Store
 
@@ -15,6 +16,39 @@ from .store import Store
 # GYFTR purchase-confirmation email's own date and still be considered
 # the same real-world event -- covers card-network posting lag.
 LINK_WINDOW_DAYS = 5
+
+# Synthetic id prefixes this module generates -- see import_purchase and
+# import_spend below. recheck() uses these (not "any transaction on a
+# voucher-<brand> account") to decide what it's safe to delete-and-
+# replay, so a hand-entered transaction on a voucher account (e.g. a
+# manual top-up not routed through GYFTR email, following the same
+# double-entry pattern documented for house-sgs) survives untouched.
+PURCHASE_ID_PREFIX = "voucher-purchase-"
+REDEMPTION_ID_PREFIX = "voucher-redemption-"
+
+
+def _ensure_voucher_account(store: Store, brand: str, opening_date: date) -> str:
+    """Registers voucher-<brand> as an Assets account (if not already
+    registered) and gives it a 0.0 opening balance as of opening_date
+    (if it doesn't already have one) -- mirrors how house-sgs is
+    registered, so the account shows a real balance in the Accounts tab
+    / balance-sheet / net-worth total instead of being excluded for
+    having no starting point. Never overwrites an opening balance that's
+    already set: a later purchase/spend for the same brand shouldn't
+    reset the running total. Returns the account name."""
+    account = f"voucher-{brand}"
+
+    account_types = store.get_config("account_types", {}) or {}
+    if account not in account_types:
+        account_types[account] = "Assets"
+        store.set_config("account_types", account_types)
+
+    opening_balances = store.get_config("account_opening_balances", {}) or {}
+    if account not in opening_balances:
+        opening_balances[account] = {"balance": 0.0, "as_of": opening_date.isoformat()}
+        store.set_config("account_opening_balances", opening_balances)
+
+    return account
 
 
 def import_purchase(store: Store, record: dict) -> str:
@@ -24,24 +58,20 @@ def import_purchase(store: Store, record: dict) -> str:
     voucher's face value, links it to the one unambiguous matching real
     card debit if exactly one exists, and returns the transaction id."""
     brand = record["brand"]
-    account = f"voucher-{brand}"
-
-    account_types = store.get_config("account_types", {}) or {}
-    if account not in account_types:
-        account_types[account] = "Assets"
-        store.set_config("account_types", account_types)
+    account = _ensure_voucher_account(store, brand, record["purchased_at"])
 
     txn = Transaction(
-        id=f"voucher-purchase-{record['code']}",
+        id=f"{PURCHASE_ID_PREFIX}{record['code']}",
         date=record["purchased_at"],
         amount=record["value"],
         direction=Direction.CREDIT,
         description_raw=f"GYFTR voucher purchase - {brand}",
         account=account,
         category="Transfers",
+        is_transfer=True,
         stage=Stage.STRUCTURAL,
         confidence=1.0,
-        status=Status.PROVISIONAL,
+        status=Status.CONFIRMED,
     )
     store.upsert_transactions([txn])
 
@@ -92,21 +122,29 @@ def _has_matching_bank_txn(store: Store, amount: float, when: date,
     )
 
 
-def import_spend(store: Store, record: dict) -> str | None:
+def import_spend(store: Store, record: dict, pipeline: Pipeline | None = None) -> str | None:
     """record: {"kind": "spend", "brand": str, "source": str,
     "amount": float, "merchant": str, "order_id": str, "order_date":
     date, "paid_via": str | None}. Returns the created transaction id,
     or None if this spend is already covered by a real bank transaction
-    (skipped, nothing created)."""
+    (skipped, nothing created).
+
+    `pipeline`, if given, is reused for Amazon Pay's classification pass
+    instead of constructing a fresh `Pipeline(store)` -- Pipeline.__init__
+    is expensive (loads the fallback ML model from disk, rebuilds the
+    merchant-memory matcher), so a caller looping over many records (e.g.
+    `munim vouchers import`/`recheck`) should build one Pipeline once and
+    pass it in. Omitted, a single-call caller gets today's behavior
+    unchanged (a Pipeline is constructed locally, once)."""
     paid_via = (record.get("paid_via") or "").strip().lower()
     if paid_via in KNOWN_REAL_PAYMENT_RAILS:
         return None
     if _has_matching_bank_txn(store, record["amount"], record["order_date"]):
         return None
 
-    account = f"voucher-{record['brand']}"
+    account = _ensure_voucher_account(store, record["brand"], record["order_date"])
     txn = Transaction(
-        id=f"voucher-redemption-{record['order_id']}",
+        id=f"{REDEMPTION_ID_PREFIX}{record['order_id']}",
         date=record["order_date"],
         amount=record["amount"],
         direction=Direction.DEBIT,
@@ -126,34 +164,39 @@ def import_spend(store: Store, record: dict) -> str | None:
         txn.category = fixed_category
         txn.stage = Stage.STRUCTURAL
         txn.confidence = 1.0
-        txn.status = Status.PROVISIONAL
+        txn.status = Status.CONFIRMED
     else:
-        from .pipeline import Pipeline
-        Pipeline(store).run([txn])
+        (pipeline or Pipeline(store)).run([txn])
 
     store.upsert_transactions([txn])
     return txn.id
 
 
 def recheck(store: Store) -> dict:
-    """Deletes every existing synthetic transaction on voucher-<brand>
-    accounts, then replays the full voucher_records log (persisted by
-    `munim vouchers import`) from scratch against the CURRENT set of
-    real bank transactions. Safe to run any time -- corrects any earlier
-    "no matching bank transaction, must be voucher-funded" guess that
-    was only true because that period's bank statement hadn't been
-    imported yet when the guess was originally made.
+    """Deletes every existing SYNTHETIC transaction this module itself
+    generated (id prefixed PURCHASE_ID_PREFIX or REDEMPTION_ID_PREFIX --
+    NOT every transaction on a voucher-<brand> account, since a user can
+    hand-enter a manual transaction there too, following the same
+    double-entry pattern documented for house-sgs, and that must survive
+    a recheck untouched), then replays the full voucher_records log
+    (persisted by `munim vouchers import`) from scratch against the
+    CURRENT set of real bank transactions. Safe to run any time --
+    corrects any earlier "no matching bank transaction, must be
+    voucher-funded" guess that was only true because that period's bank
+    statement hadn't been imported yet when the guess was originally
+    made.
 
     Returns {"checked": len(voucher_records), "removed_existing": N,
     "created": N} -- created counts new/recreated transactions across
     both purchases and non-skipped redemptions."""
     removed_existing = 0
     for t in store.all_transactions():
-        if t.account.startswith("voucher-"):
+        if t.id.startswith(PURCHASE_ID_PREFIX) or t.id.startswith(REDEMPTION_ID_PREFIX):
             store.delete_transaction(t.id)
             removed_existing += 1
 
     records = store.get_config("voucher_records", []) or []
+    pipeline = Pipeline(store)
     created = 0
     for record in records:
         if record["kind"] == "purchase":
@@ -162,7 +205,7 @@ def recheck(store: Store) -> dict:
             created += 1
         else:
             live_record = {**record, "order_date": date.fromisoformat(record["order_date"])}
-            if import_spend(store, live_record) is not None:
+            if import_spend(store, live_record, pipeline=pipeline) is not None:
                 created += 1
 
     return {"checked": len(records), "removed_existing": removed_existing, "created": created}

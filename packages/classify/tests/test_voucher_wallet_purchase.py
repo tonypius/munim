@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from munim.store import Store
-from munim.schema import Transaction, Direction
+from munim.schema import Transaction, Direction, Status
 from munim.voucher_wallet import import_purchase
 
 
@@ -31,6 +31,18 @@ def test_import_purchase_creates_credit_on_voucher_account(tmp_path):
     assert txn.amount == 2000.0
     assert txn.category == "Transfers"
     assert txn.date.isoformat() == "2026-09-14"
+    # Every other write path in this codebase treats is_transfer and
+    # category=="Transfers" as inseparable (see the "reports/dashboard
+    # check is_transfer, not the category string" convention in
+    # pipeline.py/store.py/cli.py) -- without this, flow_query/dashboard
+    # credit totals get inflated by the voucher's face value, and an
+    # ambiguous multi-candidate purchase could never show up in the
+    # Transfers tab's pending list (which filters on is_transfer).
+    assert txn.is_transfer is True
+    # Real money moved and the category is 100% deterministic -- no
+    # ambiguity for a human to review, so this should land CONFIRMED
+    # like house-sgs rows do, not PROVISIONAL.
+    assert txn.status == Status.CONFIRMED
 
 
 def test_import_purchase_registers_account_as_assets(tmp_path):
@@ -39,6 +51,25 @@ def test_import_purchase_registers_account_as_assets(tmp_path):
 
     types = store.get_config("account_types", {})
     assert types["voucher-swiggy"] == "Assets"
+
+
+def test_import_purchase_registers_a_zero_opening_balance(tmp_path):
+    store = Store(home=tmp_path)
+    import_purchase(store, PURCHASE_RECORD)
+
+    balances = store.get_config("account_opening_balances", {})
+    assert balances["voucher-swiggy"] == {"balance": 0.0, "as_of": "2026-09-14"}
+
+
+def test_import_purchase_does_not_overwrite_existing_opening_balance(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                      {"voucher-swiggy": {"balance": 500.0, "as_of": "2026-01-01"}})
+
+    import_purchase(store, PURCHASE_RECORD)
+
+    balances = store.get_config("account_opening_balances", {})
+    assert balances["voucher-swiggy"] == {"balance": 500.0, "as_of": "2026-01-01"}
 
 
 def test_import_purchase_links_to_unique_matching_card_debit(tmp_path):

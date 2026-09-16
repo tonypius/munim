@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from munim.store import Store
-from munim.schema import Transaction, Direction
+from munim.schema import Transaction, Direction, Status
 from munim.voucher_wallet import import_spend
 
 
@@ -62,6 +62,37 @@ def test_import_spend_creates_redemption_when_no_bank_match(tmp_path):
     assert txn.direction == Direction.DEBIT
     assert txn.amount == 395.0
     assert txn.category == "Groceries"
+    # Deterministic category, real money moved -- CONFIRMED like
+    # house-sgs rows, not PROVISIONAL (adjudicated decision; the Amazon
+    # Pay/Pipeline branch below is explicitly NOT part of this).
+    assert txn.status == Status.CONFIRMED
+
+
+def test_import_spend_registers_account_type_and_opening_balance(tmp_path):
+    # import_purchase already did this; import_spend didn't at all, so a
+    # brand created only via import_spend (amazonpay, since GYFTR_BRAND_MAP
+    # currently only maps to "swiggy") never got an opening balance and
+    # showed a blank balance in the Accounts tab / was excluded from net
+    # worth.
+    store = Store(home=tmp_path)
+
+    import_spend(store, INSTAMART_RECORD)
+
+    types = store.get_config("account_types", {})
+    assert types["voucher-swiggy"] == "Assets"
+    balances = store.get_config("account_opening_balances", {})
+    assert balances["voucher-swiggy"] == {"balance": 0.0, "as_of": "2026-09-14"}
+
+
+def test_import_spend_does_not_overwrite_existing_opening_balance(tmp_path):
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                      {"voucher-swiggy": {"balance": 250.0, "as_of": "2026-01-01"}})
+
+    import_spend(store, INSTAMART_RECORD)
+
+    balances = store.get_config("account_opening_balances", {})
+    assert balances["voucher-swiggy"] == {"balance": 250.0, "as_of": "2026-01-01"}
 
 
 def test_import_spend_swiggy_order_category_is_dining(tmp_path):
@@ -73,12 +104,41 @@ def test_import_spend_swiggy_order_category_is_dining(tmp_path):
     txn = store.get_transaction(txn_id)
     assert txn.account == "voucher-swiggy"
     assert txn.category == "Dining"
+    assert txn.status == Status.CONFIRMED
+
+
+def test_import_spend_reuses_passed_pipeline_instead_of_constructing_one(tmp_path, monkeypatch):
+    # Pipeline.__init__ is expensive (loads the fallback ML model from
+    # disk, rebuilds the merchant-memory matcher) -- a caller looping
+    # over many records (munim vouchers import/recheck) should build one
+    # Pipeline once and pass it in, not pay that cost per call.
+    import munim.voucher_wallet as voucher_wallet
+
+    def _must_not_construct(*args, **kwargs):
+        raise AssertionError(
+            "import_spend must not construct its own Pipeline when one is passed in")
+
+    monkeypatch.setattr(voucher_wallet, "Pipeline", _must_not_construct)
+
+    calls = []
+
+    class FakePipeline:
+        def run(self, txns):
+            calls.append(txns)
+            for t in txns:
+                t.category = "Dining"
+
+    store = Store(home=tmp_path)
+    txn_id = import_spend(store, AMAZONPAY_RECORD, pipeline=FakePipeline())
+
+    assert len(calls) == 1
+    txn = store.get_transaction(txn_id)
+    assert txn.category == "Dining"
 
 
 def test_import_spend_amazonpay_uses_pipeline_classification(tmp_path):
     store = Store(home=tmp_path)
     store.set_config("categories", ["Dining", "Groceries"])
-    from munim.memory import MemoryMatcher
     store.remember("ZOMATO", "Dining", kind="merchant")
 
     txn_id = import_spend(store, AMAZONPAY_RECORD)

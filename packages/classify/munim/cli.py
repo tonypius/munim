@@ -1195,10 +1195,14 @@ app.add_typer(vouchers_app, name="vouchers")
 
 
 def _record_key(record: dict) -> str:
-    """The natural identifier a record log entry is deduplicated by --
-    matches the id scheme import_purchase/import_spend use, so a record
-    already present in voucher_records (by this key) is never appended
-    twice even if the same source file is imported again."""
+    """The natural identifier a record log entry is deduplicated by. This
+    is its own namespace, intentionally distinct from the transaction id
+    scheme import_purchase/import_spend use (those are prefixed
+    "voucher-purchase-"/"voucher-redemption-"; these keys are
+    "purchase-<code>"/"spend-<order_id>") -- it only needs to be stable
+    and unique per record so voucher_records (persisted config, not
+    transaction rows) is never appended twice for the same source
+    record, even if the same fetched file is imported again."""
     if record["kind"] == "purchase":
         return f"purchase-{record['code']}"
     return f"spend-{record['order_id']}"
@@ -1215,6 +1219,10 @@ def vouchers_import(file: Path = typer.Argument(..., exists=True,
     store = _store()
     existing_records = store.get_config("voucher_records", []) or []
     existing_keys = {_record_key(r) for r in existing_records}
+    # Built once and reused across the whole loop -- Pipeline.__init__ is
+    # expensive (loads the fallback ML model from disk, rebuilds the
+    # merchant-memory matcher), and this loop may process many records.
+    pipeline = Pipeline(store)
 
     purchased = created = skipped = 0
     new_records = []
@@ -1229,7 +1237,7 @@ def vouchers_import(file: Path = typer.Argument(..., exists=True,
             purchased += 1
         else:
             live_record = {**record, "order_date": date_cls.fromisoformat(record["order_date"])}
-            if import_spend(store, live_record) is not None:
+            if import_spend(store, live_record, pipeline=pipeline) is not None:
                 created += 1
             else:
                 skipped += 1
