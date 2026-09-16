@@ -4,6 +4,7 @@ local folder for munim to classify.
 from __future__ import annotations
 
 import getpass
+import json as json_module
 import os
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,8 @@ from .packs import PackNotFoundError, list_packs, load_pack
 from .pdf_extract import (
     PdfPasswordError, extract_all_text, extract_rows, filter_transaction_rows, open_pdf,
 )
+from .voucher_packs import GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FROM
+from .voucher_parse import parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart
 
 def _is_hdfc_v2_layout(rows):
     """The newer HDFC template (a card-number upgrade on the same
@@ -268,6 +271,106 @@ def gmail_fetch(
                 f"\n[bold]{total}[/bold] attachment(s) downloaded to {escape(str(out_dir))}.")
     finally:
         conn.logout()
+
+
+_VOUCHER_SENDERS = [
+    (GYFTR_FROM, parse_gyftr),
+    (AMAZONPAY_FROM, parse_amazonpay),
+    (SWIGGY_FROM, parse_swiggy),
+    (INSTAMART_FROM, parse_instamart),
+]
+
+
+def _json_default(value):
+    # date objects (purchased_at / order_date) have no native JSON
+    # representation -- serialize as ISO strings, matching how Task 7's
+    # `munim vouchers import` parses them back with date.fromisoformat.
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    raise TypeError(f"not JSON serializable: {value!r}")
+
+
+@gmail_app.command("fetch-vouchers")
+def gmail_fetch_vouchers(
+    email: str = typer.Option(..., prompt=True, help="Your Gmail address"),
+    out: Path = typer.Option(None, help="Output JSONL file (default: ~/.munim-ingest/vouchers.jsonl)"),
+    mailbox: str = typer.Option("INBOX", help="IMAP mailbox to search"),
+    imap_host: str = typer.Option("imap.gmail.com"),
+    imap_port: int = typer.Option(993),
+    since: str = typer.Option(
+        None, "--since",
+        help="Only messages on/after this date (YYYY-MM-DD)."),
+):
+    """Search Gmail for GYFTR/Amazon Pay/Swiggy/Instamart emails and
+    write one parsed voucher record per line to a JSONL file for
+    `munim vouchers import`. No attachments involved -- these senders
+    put the spend detail directly in the email body. Same password
+    handling as `gmail fetch`: the app password is read from
+    MUNIM_GMAIL_APP_PASSWORD if set, otherwise prompted, never written
+    to disk.
+    """
+    since_date = None
+    if since is not None:
+        try:
+            since_date = datetime.strptime(since, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[red]--since must be YYYY-MM-DD, got {escape(since)}[/red]")
+            raise typer.Exit(1)
+
+    password = os.environ.get("MUNIM_GMAIL_APP_PASSWORD") or getpass.getpass(
+        f"App password for {email} (never stored): ")
+
+    config = ImapConfig(host=imap_host, port=imap_port, email=email, password=password)
+    try:
+        conn = connect(config)
+    except Exception as e:
+        console.print(f"[red]Could not connect or log in: {escape(str(e))}[/red]")
+        raise typer.Exit(1)
+
+    out_file = out or (DEFAULT_HOME / "vouchers.jsonl")
+    records = []
+    try:
+        all_domains = [d for d, _ in _VOUCHER_SENDERS]
+        uids = search_uids(conn, mailbox, all_domains, since=since_date)
+        console.print(f"Found {len(uids)} candidate message(s) in {escape(mailbox)}.")
+
+        consecutive_failures = 0
+        for uid in uids:
+            try:
+                status, data = conn.fetch(uid, "(RFC822)")
+                if status != "OK" or not data or not data[0]:
+                    continue
+                item = data[0]
+                if not isinstance(item, tuple) or len(item) < 2:
+                    continue
+                raw = item[1]
+                for _domain, parser in _VOUCHER_SENDERS:
+                    record = parser(raw)
+                    if record is not None:
+                        records.append(record)
+                        break
+            except Exception as e:
+                consecutive_failures += 1
+                console.print(
+                    f"[yellow]Skipping message {escape(str(uid))}: {escape(str(e))}[/yellow]")
+                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                    console.print(
+                        f"[red]Stopping after {consecutive_failures} consecutive failures.[/red]")
+                    break
+                continue
+            else:
+                consecutive_failures = 0
+    finally:
+        conn.logout()
+
+    if records:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_file, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json_module.dumps(record, default=_json_default) + "\n")
+        console.print(f"[green]{len(records)}[/green] voucher record(s) written to {escape(str(out_file))}.")
+    else:
+        console.print("[bold]0[/bold] voucher record(s) found.")
 
 
 @pdf_app.command("extract")
