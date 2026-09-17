@@ -405,7 +405,15 @@ def gmail_fetch_vouchers(
                     parsed_by_domain[domain] += 1
                 elif domain is not None and dump_unparsed is not None:
                     dest = dump_unparsed / f"{domain}.eml"
-                    if not dest.exists():
+                    # Most inboxes have far more marketing mail than
+                    # real orders from these senders -- dumping the
+                    # literal first unparsed message tends to catch a
+                    # promo email (which correctly parses to nothing),
+                    # not a genuine order that's failing. This heuristic
+                    # targets messages that look like a real transaction.
+                    looks_like_a_real_order = (
+                        b"order id" in raw.lower() or b"was paid on" in raw.lower())
+                    if not dest.exists() and looks_like_a_real_order:
                         dump_unparsed.mkdir(parents=True, exist_ok=True)
                         dest.write_bytes(raw)
             except Exception as e:

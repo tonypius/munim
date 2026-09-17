@@ -12,6 +12,7 @@ by sender first.
 from __future__ import annotations
 
 import email
+import html as html_lib
 import re
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
@@ -20,26 +21,41 @@ from .voucher_packs import brand_for_gyftr_product
 
 
 def _text_body(msg) -> str:
-    """Best-effort plain-text body: prefers a text/plain part, falls
-    back to stripping tags from text/html if that's all there is."""
+    """Best-effort plain-text body. Real senders sometimes ship a
+    text/plain alternative that's a short stub ("Thanks for your
+    payment.") with the actual order/amount detail living only in the
+    HTML alternative (confirmed via a real Amazon Pay email dumped with
+    --dump-unparsed) -- preferring "plain if present" would then
+    silently return incomplete text forever. Decodes both alternatives
+    and returns whichever has more actual content."""
+    plain_payload = html_payload = None
     if msg.is_multipart():
-        plain = html = None
         for part in msg.walk():
             ctype = part.get_content_type()
-            if ctype == "text/plain" and plain is None:
-                plain = part.get_payload(decode=True)
-            elif ctype == "text/html" and html is None:
-                html = part.get_payload(decode=True)
-        payload = plain if plain is not None else html
+            if ctype == "text/plain" and plain_payload is None:
+                plain_payload = part.get_payload(decode=True)
+            elif ctype == "text/html" and html_payload is None:
+                html_payload = part.get_payload(decode=True)
+    elif msg.get_content_type() == "text/html":
+        html_payload = msg.get_payload(decode=True)
     else:
-        payload = msg.get_payload(decode=True)
-    if payload is None:
-        return ""
+        plain_payload = msg.get_payload(decode=True)
+
     charset = msg.get_content_charset() or "utf-8"
-    text = payload.decode(charset, errors="replace")
-    if msg.get_content_type() == "text/html" or (msg.is_multipart() and plain is None):
-        text = re.sub(r"<[^>]+>", "\n", text)
-    return text
+    plain_text = plain_payload.decode(charset, errors="replace") if plain_payload else ""
+    html_text = ""
+    if html_payload:
+        html_text = html_payload.decode(charset, errors="replace")
+        # Strip style/script blocks WITH their content first -- the
+        # generic tag-stripping below only removes the tags themselves,
+        # which would otherwise leave raw CSS/JS text inline and could
+        # confuse a field regex or bloat the search space.
+        html_text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ",
+                           html_text, flags=re.I | re.S)
+        html_text = re.sub(r"<[^>]+>", "\n", html_text)
+        html_text = html_lib.unescape(html_text)
+
+    return html_text if len(html_text) > len(plain_text) else plain_text
 
 
 def _header_date(msg) -> date | None:

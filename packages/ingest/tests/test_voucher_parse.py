@@ -1,6 +1,7 @@
 # packages/ingest/tests/test_voucher_parse.py
 import sys
 from datetime import date
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -16,6 +17,16 @@ def _msg(subject, from_addr, date_header, body) -> bytes:
     msg["Subject"] = subject
     msg["From"] = from_addr
     msg["Date"] = date_header
+    return msg.as_bytes()
+
+
+def _multipart_msg(subject, from_addr, date_header, plain_body, html_body) -> bytes:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["Date"] = date_header
+    msg.attach(MIMEText(plain_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
     return msg.as_bytes()
 
 
@@ -228,6 +239,56 @@ def test_parse_amazonpay_extracts_amount_merchant_order_id_and_date():
         "kind": "spend", "brand": "gyftr", "source": "amazonpay",
         "amount": 132.0, "merchant": "Amazon.in",
         "order_id": "171-9035274-8173116", "order_date": date(2026, 9, 1),
+        "paid_via": None,
+    }
+
+
+# A real fetched Amazon Pay email (confirmed via --dump-unparsed): the
+# text/plain alternative is a short stub with none of the order detail,
+# and the actual Order ID/Order Date/amount live only in the HTML
+# alternative -- with a <style> block ahead of the body, and the Order
+# ID wrapped in an <a href=...> tracking link, exactly like this.
+AMAZONPAY_PLAIN_STUB = "Hi Tony,\r\nThanks for using Amazon Pay Balance. Your payment was successful.\r\n"
+AMAZONPAY_REAL_HTML = """<html>
+<head>
+<style>
+  #amount {
+    padding-right: 17px;
+    font-size: 24px;
+  }
+  .paymentDetailsHeading {
+    font-size: 13px;
+  }
+</style>
+</head><body>
+<table><tr><td id="greetings">Hi Tony,</td></tr></table>
+<table><tr>
+<td id="paymentHighlightsHeading1">Paid on</td>
+<td id="paymentHighlightsHeading2">Amount</td>
+</tr><tr>
+<td id="bankName"><b>Amazon.in</b></td>
+<td id="amount"><b>&#8377;109.00</b></td>
+</tr></table>
+<table id="paymentDetails">
+<tr><td class="paymentDetailsHeading">Order ID</td>
+<td class="paymentDetailsContent"><a href="https://track.example.com/L0/very-long-tracking-url">406-7409280-4736312</a></td></tr>
+<tr><td class="paymentDetailsHeading">Order Date</td>
+<td class="paymentDetailsContent">01 May 2025</td></tr>
+</table>
+</body></html>"""
+
+
+def test_parse_amazonpay_falls_back_to_html_when_plain_text_is_a_stub():
+    raw = _multipart_msg(
+        "Rs 109.00 was paid on Amazon.in",
+        "Amazon Pay India <no-reply@amazonpay.in>",
+        "Thu, 1 May 2025 04:39:45 +0000",
+        AMAZONPAY_PLAIN_STUB, AMAZONPAY_REAL_HTML)
+    record = parse_amazonpay(raw)
+    assert record == {
+        "kind": "spend", "brand": "gyftr", "source": "amazonpay",
+        "amount": 109.0, "merchant": "Amazon.in",
+        "order_id": "406-7409280-4736312", "order_date": date(2025, 5, 1),
         "paid_via": None,
     }
 
