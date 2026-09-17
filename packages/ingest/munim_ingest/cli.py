@@ -27,10 +27,7 @@ from .pdf_extract import (
     PdfPasswordError, extract_all_text, extract_rows, filter_transaction_rows, open_pdf,
 )
 from .voucher_packs import GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FROM
-from .voucher_parse import (
-    parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart,
-    UnrecognizedGyftrBrand,
-)
+from .voucher_parse import parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart
 
 def _is_hdfc_v2_layout(rows):
     """The newer HDFC template (a card-number upgrade on the same
@@ -276,12 +273,12 @@ def gmail_fetch(
         conn.logout()
 
 
-_VOUCHER_SENDERS = [
-    (GYFTR_FROM, parse_gyftr),
-    (AMAZONPAY_FROM, parse_amazonpay),
-    (SWIGGY_FROM, parse_swiggy),
-    (INSTAMART_FROM, parse_instamart),
-]
+_VOUCHER_SEARCH_DOMAINS = [GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FROM]
+
+# GYFTR isn't in this list -- it's dispatched separately, since
+# parse_gyftr returns (records, unrecognized) for a possibly-multi-item
+# email rather than the single dict-or-None every other sender returns.
+_SINGLE_RECORD_PARSERS = [parse_amazonpay, parse_swiggy, parse_instamart]
 
 
 def _json_default(value):
@@ -334,8 +331,7 @@ def gmail_fetch_vouchers(
     records = []
     unrecognized_brands = 0
     try:
-        all_domains = [d for d, _ in _VOUCHER_SENDERS]
-        uids = search_uids(conn, mailbox, all_domains, since=since_date)
+        uids = search_uids(conn, mailbox, _VOUCHER_SEARCH_DOMAINS, since=since_date)
         console.print(f"Found {len(uids)} candidate message(s) in {escape(mailbox)}.")
 
         consecutive_failures = 0
@@ -348,21 +344,26 @@ def gmail_fetch_vouchers(
                 if not isinstance(item, tuple) or len(item) < 2:
                     continue
                 raw = item[1]
-                for _domain, parser in _VOUCHER_SENDERS:
-                    try:
-                        record = parser(raw)
-                    except UnrecognizedGyftrBrand as e:
-                        # A genuine GYFTR voucher-purchase email whose
-                        # product line isn't in GYFTR_BRAND_MAP yet --
-                        # per the design, this must be skipped and
-                        # logged, never silently dropped or guessed.
-                        console.print(
-                            f"[yellow]Skipping a GYFTR voucher: unrecognized "
-                            f"product line '{escape(e.product_text)}' -- add "
-                            f"it to GYFTR_BRAND_MAP in voucher_packs.py to "
-                            f"support this brand.[/yellow]")
-                        unrecognized_brands += 1
-                        record = None
+
+                # GYFTR can bundle more than one voucher (and unrelated
+                # promo codes) into a single email -- dispatched
+                # separately from the single-record parsers below.
+                gyftr_records, gyftr_unrecognized = parse_gyftr(raw)
+                records.extend(gyftr_records)
+                for product_text in gyftr_unrecognized:
+                    # A genuine GYFTR voucher-purchase email whose
+                    # product line isn't in GYFTR_BRAND_MAP yet -- per
+                    # the design, this must be skipped and logged, never
+                    # silently dropped or guessed.
+                    console.print(
+                        f"[yellow]Skipping a GYFTR voucher: unrecognized "
+                        f"product line '{escape(product_text)}' -- add "
+                        f"it to GYFTR_BRAND_MAP in voucher_packs.py to "
+                        f"support this brand.[/yellow]")
+                unrecognized_brands += len(gyftr_unrecognized)
+
+                for parser in _SINGLE_RECORD_PARSERS:
+                    record = parser(raw)
                     if record is not None:
                         records.append(record)
                         break

@@ -19,26 +19,6 @@ from email.utils import parsedate_to_datetime
 from .voucher_packs import brand_for_gyftr_product
 
 
-class UnrecognizedGyftrBrand(Exception):
-    """Raised by parse_gyftr when a message is a genuine GYFTR
-    purchase-confirmation email (it has both a "Value" and an "E-Gift
-    Card Code" -- the two fields every real GYFTR voucher purchase
-    carries) but its product-line text doesn't match any entry in
-    voucher_packs.GYFTR_BRAND_MAP. This is deliberately distinct from
-    parse_gyftr returning None, which means "not a GYFTR voucher-purchase
-    email at all" (wrong sender, or missing the fields above). The
-    design spec requires an unrecognized brand be "skipped and logged
-    rather than silently creating a wrongly-named account" -- collapsing
-    both cases into a bare `None` would make that impossible to tell
-    apart from the caller, so the caller (gmail fetch-vouchers) catches
-    this specifically to print a warning naming the unmatched product
-    line."""
-
-    def __init__(self, product_text: str):
-        self.product_text = product_text
-        super().__init__(f"Unrecognized GYFTR product line: {product_text!r}")
-
-
 def _text_body(msg) -> str:
     """Best-effort plain-text body: prefers a text/plain part, falls
     back to stripping tags from text/html if that's all there is."""
@@ -84,38 +64,76 @@ def _amount(text: str, label: str) -> float | None:
     return float(m.group(1).replace(",", ""))
 
 
-def parse_gyftr(raw_email: bytes) -> dict | None:
-    """Returns a purchase record, or None if this isn't a GYFTR
-    voucher-purchase email at all (wrong sender, or missing the Value/
-    E-Gift Card Code/Date fields every real one carries). Raises
-    UnrecognizedGyftrBrand -- distinct from returning None -- if it IS a
-    genuine GYFTR purchase-confirmation email but its product-line text
-    doesn't match any brand in GYFTR_BRAND_MAP."""
+def _last_nonempty_line(text: str, max_len: int = 120) -> str:
+    """Best-effort guess at "the product name" for an unrecognized-brand
+    warning: the last non-blank line before whatever follows (in
+    practice, the line immediately above "E-Gift Card Code"). Real GYFTR
+    emails don't reliably repeat the product line twice in a row (some
+    samples do, some don't), so this doesn't assume that shape -- it
+    just takes the nearest non-empty text, which matches every real
+    sample seen."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if lines:
+        return lines[-1][:max_len]
+    return text.strip()[:max_len]
+
+
+def parse_gyftr(raw_email: bytes) -> tuple[list[dict], list[str]]:
+    """Returns (records, unrecognized_product_lines) for a GYFTR
+    voucher-purchase email. A single email can bundle more than one
+    purchased voucher (e.g. two Zepto vouchers bought together), and can
+    also bundle unrelated marketing promo-code blocks (no "E-Gift Card
+    Code", no money spent) alongside real vouchers -- those are silently
+    skipped, never counted as vouchers or as unrecognized brands.
+
+    Both lists are empty if this isn't a GYFTR voucher-purchase email at
+    all (wrong sender, or no real voucher block found). A brand not in
+    voucher_packs.GYFTR_BRAND_MAP contributes its product-line text to
+    `unrecognized_product_lines` instead of a record, so the design's
+    "skipped and logged, never guessed" requirement holds even when
+    other vouchers in the same email ARE recognized.
+    """
     msg = email.message_from_bytes(raw_email)
     if "gyftr" not in (msg["From"] or "").lower():
-        return None
+        return [], []
     text = _text_body(msg)
-    value = _amount(text, "Value")
-    code_match = re.search(r"E-Gift Card Code\s*\n\s*(\S+)", text)
     purchased_at = _header_date(msg)
-    if value is None or not code_match or purchased_at is None:
-        return None
+    if purchased_at is None:
+        return [], []
 
-    brand = brand_for_gyftr_product(text)
-    if brand is None:
-        # Best-effort extraction of the repeated product-line text (it
-        # appears twice in a row directly above "E-Gift Card Code" in
-        # every real sample seen) to name in the warning; falls back to
-        # the whole body if that shape doesn't match either, so the
-        # warning is never silently empty.
-        product_match = re.search(r"\n([^\n]+)\n\1\n+E-Gift Card Code", text)
-        product_text = product_match.group(1).strip() if product_match else text.strip()
-        raise UnrecognizedGyftrBrand(product_text)
+    # Splitting on the "E-Gift Card Code" label anchors each voucher
+    # block: parts[i] ends with this block's product-name line (and, for
+    # i>0, may also contain the PREVIOUS block's trailing Valid-Till/promo
+    # text -- harmless, since brand lookup only cares about a substring
+    # match), and parts[i+1] starts with this block's code/value/pin.
+    # A promo-code block has no "E-Gift Card Code" at all, so it never
+    # creates a split point and is never mistaken for a voucher.
+    parts = re.split(r"E-Gift Card Code", text)
+    if len(parts) < 2:
+        return [], []
 
-    return {
-        "kind": "purchase", "brand": brand, "value": value,
-        "code": code_match.group(1), "purchased_at": purchased_at,
-    }
+    records: list[dict] = []
+    unrecognized: list[str] = []
+    for i in range(len(parts) - 1):
+        brand_chunk = parts[i]
+        data_chunk = parts[i + 1]
+
+        code_match = re.match(r"\s*(\S+)", data_chunk)
+        value = _amount(data_chunk, "Value")
+        if not code_match or value is None:
+            continue
+
+        brand = brand_for_gyftr_product(brand_chunk)
+        if brand is None:
+            unrecognized.append(_last_nonempty_line(brand_chunk))
+            continue
+
+        records.append({
+            "kind": "purchase", "brand": brand, "value": value,
+            "code": code_match.group(1), "purchased_at": purchased_at,
+        })
+
+    return records, unrecognized
 
 
 def parse_amazonpay(raw_email: bytes) -> dict | None:

@@ -28,4 +28,21 @@ def test_brand_for_gyftr_product_is_case_insensitive():
 
 
 def test_brand_for_gyftr_product_returns_none_for_unknown_brand():
-    assert brand_for_gyftr_product("Bata Voucher") is None
+    assert brand_for_gyftr_product("Croma Voucher") is None
+
+
+def test_brand_for_gyftr_product_recognizes_amazon_variants():
+    assert brand_for_gyftr_product("Amazon") == "amazonpay"
+    assert brand_for_gyftr_product("Amazon Shopping Voucher") == "amazonpay"
+
+
+def test_brand_for_gyftr_product_recognizes_swiggy_instamart():
+    assert brand_for_gyftr_product("Swiggy Instamart") == "swiggy"
+
+
+def test_brand_for_gyftr_product_recognizes_other_known_brands():
+    assert brand_for_gyftr_product("LENSKART") == "lenskart"
+    assert brand_for_gyftr_product("Bata") == "bata"
+    assert brand_for_gyftr_product("Zepto") == "zepto"
+    assert brand_for_gyftr_product("Westside") == "westside"
+    assert brand_for_gyftr_product("MAX") == "max"

@@ -18,6 +18,14 @@ INSTAMART_FROM = "instamart.in"
 # matched case-insensitively as a substring of the email body.
 GYFTR_BRAND_MAP: dict[str, str] = {
     "swiggy money voucher": "swiggy",
+    "swiggy instamart": "swiggy",
+    "amazon shopping voucher": "amazonpay",
+    "amazon": "amazonpay",
+    "lenskart": "lenskart",
+    "bata": "bata",
+    "zepto": "zepto",
+    "westside": "westside",
+    "max": "max",
 }
 
 

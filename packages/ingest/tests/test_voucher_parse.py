@@ -6,11 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pytest
-
 from munim_ingest.voucher_parse import (
     parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart,
-    UnrecognizedGyftrBrand,
 )
 
 
@@ -47,25 +44,165 @@ def test_parse_gyftr_extracts_brand_value_code_and_date():
     raw = _msg(
         "Confidential - Your Gift Voucher details from GyFTR via HDFC Bank PayZapp Shop e-Vouchers",
         "GyFTR <gifts@gyftr.com>", "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_BODY)
-    record = parse_gyftr(raw)
-    assert record == {
+    records, unrecognized = parse_gyftr(raw)
+    assert records == [{
         "kind": "purchase", "brand": "swiggy", "value": 2000.0,
         "code": "VGHDR7VACB6SD15E", "purchased_at": date(2026, 9, 14),
-    }
+    }]
+    assert unrecognized == []
 
 
-def test_parse_gyftr_raises_for_unrecognized_brand():
+def test_parse_gyftr_reports_unrecognized_brand_without_raising():
     # A genuine GYFTR purchase-confirmation email (has both Value and
     # E-Gift Card Code) but a product line not in GYFTR_BRAND_MAP must
     # be distinguishable from "not a GYFTR email at all" -- silently
-    # returning None here would make it indistinguishable from that case
-    # and this brand would be dropped with zero user-visible signal.
+    # returning nothing here would make it indistinguishable from that
+    # case and this brand would be dropped with zero user-visible signal.
     raw = _msg("Your Gift Voucher", "GyFTR <gifts@gyftr.com>",
                "Mon, 14 Sep 2026 14:09:00 +0530",
-               GYFTR_BODY.replace("Swiggy Money Voucher", "Bata Voucher"))
-    with pytest.raises(UnrecognizedGyftrBrand) as exc_info:
-        parse_gyftr(raw)
-    assert "Bata Voucher" in exc_info.value.product_text
+               GYFTR_BODY.replace("Swiggy Money Voucher", "Croma Voucher"))
+    records, unrecognized = parse_gyftr(raw)
+    assert records == []
+    assert unrecognized == ["Croma Voucher"]
+
+
+GYFTR_MULTI_ZEPTO_BODY = """Dear Customer,
+Congratulations! Thank you for buying Gift Voucher from Gyftr via HDFC Bank PayZapp Shop e-Vouchers. Please find your instant voucher details.
+
+Zepto
+
+E-Gift Card Code
+6009750167418156
+
+Value
+1000
+PIN
+174657
+
+Valid Till
+31 Jul 2027
+
+Zepto
+
+E-Gift Card Code
+6009750167153158
+
+Value
+1000
+PIN
+185809
+
+Valid Till
+31 Jul 2027
+
+To Redeem your Gift Voucher: Click Here.
+"""
+
+
+def test_parse_gyftr_extracts_every_voucher_from_a_multi_item_email():
+    # A single GYFTR email can bundle more than one purchased voucher
+    # (e.g. buying two Zepto vouchers in one checkout) -- both must be
+    # extracted, not just the first.
+    raw = _msg("Your Gift Vouchers", "GyFTR <gifts@gyftr.com>",
+               "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_MULTI_ZEPTO_BODY)
+    records, unrecognized = parse_gyftr(raw)
+    assert records == [
+        {"kind": "purchase", "brand": "zepto", "value": 1000.0,
+         "code": "6009750167418156", "purchased_at": date(2026, 9, 14)},
+        {"kind": "purchase", "brand": "zepto", "value": 1000.0,
+         "code": "6009750167153158", "purchased_at": date(2026, 9, 14)},
+    ]
+    assert unrecognized == []
+
+
+GYFTR_PROMO_PLUS_VOUCHER_BODY = """Dear Customer,
+Congratulations! Thank you for buying Gift Voucher from Gyftr via HDFC Bank PayZapp Shop e-Vouchers. Please find your instant voucher details.
+
+Barbeque Nation Promo Code
+
+Promo Code
+XZJM7RZTYO3I4X4
+
+Valid Till
+12 Dec 2026
+
+Promo Code Details
+INR 1000 OFF on minimum booking of 8 pax or more
+
+Swiggy Instamart
+
+E-Gift Card Code
+VOGRRS01K7PFC93A
+
+Value
+5000
+PIN
+995645
+
+Valid Till
+04 Sep 2026
+
+To Redeem your Gift Voucher: Click Here.
+"""
+
+
+def test_parse_gyftr_ignores_a_promo_code_bundled_with_a_real_voucher():
+    # GYFTR emails sometimes bundle an unrelated marketing promo code
+    # (no E-Gift Card Code, no money spent) alongside a real purchased
+    # voucher -- the promo must never be treated as a voucher, and must
+    # not be reported as an unrecognized brand either.
+    raw = _msg("Your Gift Voucher", "GyFTR <gifts@gyftr.com>",
+               "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_PROMO_PLUS_VOUCHER_BODY)
+    records, unrecognized = parse_gyftr(raw)
+    assert records == [{
+        "kind": "purchase", "brand": "swiggy", "value": 5000.0,
+        "code": "VOGRRS01K7PFC93A", "purchased_at": date(2026, 9, 14),
+    }]
+    assert unrecognized == []
+
+
+GYFTR_MIXED_RECOGNIZED_UNRECOGNIZED_BODY = """Dear Customer,
+Congratulations! Thank you for buying Gift Voucher from Gyftr via HDFC Bank PayZapp Shop e-Vouchers. Please find your instant voucher details.
+
+Zepto
+
+E-Gift Card Code
+6009750167588875
+
+Value
+2000
+PIN
+253456
+
+Valid Till
+05 Nov 2026
+
+Croma
+
+E-Gift Card Code
+CRVG01I8YY1NWTQA
+
+Value
+1500
+PIN
+998877
+
+Valid Till
+31 Dec 2026
+
+To Redeem your Gift Voucher: Click Here.
+"""
+
+
+def test_parse_gyftr_reports_both_recognized_and_unrecognized_from_one_email():
+    raw = _msg("Your Gift Vouchers", "GyFTR <gifts@gyftr.com>",
+               "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_MIXED_RECOGNIZED_UNRECOGNIZED_BODY)
+    records, unrecognized = parse_gyftr(raw)
+    assert records == [{
+        "kind": "purchase", "brand": "zepto", "value": 2000.0,
+        "code": "6009750167588875", "purchased_at": date(2026, 9, 14),
+    }]
+    assert unrecognized == ["Croma"]
 
 
 AMAZONPAY_BODY = """Hi Tony,
@@ -152,7 +289,7 @@ def test_parse_instamart_extracts_amount_order_id_and_no_paid_via():
 def test_parsers_return_none_for_unrelated_email():
     raw = _msg("Hello", "someone@example.com",
                "Mon, 14 Sep 2026 12:09:00 +0530", "Not a voucher email.")
-    assert parse_gyftr(raw) is None
+    assert parse_gyftr(raw) == ([], [])
     assert parse_amazonpay(raw) is None
     assert parse_swiggy(raw) is None
     assert parse_instamart(raw) is None
