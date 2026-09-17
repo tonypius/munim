@@ -3,6 +3,7 @@ local folder for munim to classify.
 """
 from __future__ import annotations
 
+import email as email_module
 import getpass
 import json as json_module
 import os
@@ -281,6 +282,21 @@ _VOUCHER_SEARCH_DOMAINS = [GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FR
 _SINGLE_RECORD_PARSERS = [parse_amazonpay, parse_swiggy, parse_instamart]
 
 
+def _sender_domain(raw_email: bytes) -> str | None:
+    """Which of _VOUCHER_SEARCH_DOMAINS this message's From header
+    belongs to, or None if it matches none of them (shouldn't happen
+    given the IMAP search already filtered on these senders, but a
+    From header can theoretically be spoofed/malformed). Used only for
+    the seen-vs-parsed diagnostic breakdown below -- a parser returning
+    None for a real email from a known sender is otherwise invisible,
+    indistinguishable from "no voucher mail from this sender at all"."""
+    from_header = (email_module.message_from_bytes(raw_email)["From"] or "").lower()
+    for domain in _VOUCHER_SEARCH_DOMAINS:
+        if domain in from_header:
+            return domain
+    return None
+
+
 def _json_default(value):
     # date objects (purchased_at / order_date) have no native JSON
     # representation -- serialize as ISO strings, matching how Task 7's
@@ -330,6 +346,8 @@ def gmail_fetch_vouchers(
     out_file = out or (DEFAULT_HOME / "vouchers.jsonl")
     records = []
     unrecognized_brands = 0
+    seen_by_domain: dict[str, int] = {d: 0 for d in _VOUCHER_SEARCH_DOMAINS}
+    parsed_by_domain: dict[str, int] = {d: 0 for d in _VOUCHER_SEARCH_DOMAINS}
     try:
         uids = search_uids(conn, mailbox, _VOUCHER_SEARCH_DOMAINS, since=since_date)
         console.print(f"Found {len(uids)} candidate message(s) in {escape(mailbox)}.")
@@ -345,11 +363,18 @@ def gmail_fetch_vouchers(
                     continue
                 raw = item[1]
 
+                domain = _sender_domain(raw)
+                if domain is not None:
+                    seen_by_domain[domain] += 1
+                parsed_this_message = False
+
                 # GYFTR can bundle more than one voucher (and unrelated
                 # promo codes) into a single email -- dispatched
                 # separately from the single-record parsers below.
                 gyftr_records, gyftr_unrecognized = parse_gyftr(raw)
                 records.extend(gyftr_records)
+                if gyftr_records:
+                    parsed_this_message = True
                 for product_text in gyftr_unrecognized:
                     # A genuine GYFTR voucher-purchase email whose
                     # product line isn't in GYFTR_BRAND_MAP yet -- per
@@ -366,7 +391,11 @@ def gmail_fetch_vouchers(
                     record = parser(raw)
                     if record is not None:
                         records.append(record)
+                        parsed_this_message = True
                         break
+
+                if domain is not None and parsed_this_message:
+                    parsed_by_domain[domain] += 1
             except Exception as e:
                 consecutive_failures += 1
                 console.print(
@@ -395,6 +424,18 @@ def gmail_fetch_vouchers(
             f"skipped due to an unrecognized product line -- see warning(s) "
             f"above; that many fewer records were written than candidate "
             f"messages found.")
+
+    # A parser silently returning None for a real email is otherwise
+    # invisible -- this is the only signal that distinguishes "no
+    # voucher mail from this sender" from "dozens of real emails that
+    # all failed to parse" (e.g. a Swiggy/Amazon Pay email format
+    # variant the regex doesn't match). A sender with seen > 0 but a
+    # much lower parsed count is worth investigating with a real sample
+    # of one of the un-parsed messages.
+    console.print("\nPer-sender: seen vs. parsed")
+    for domain in _VOUCHER_SEARCH_DOMAINS:
+        console.print(f"  {domain}: {seen_by_domain[domain]} seen, "
+                      f"{parsed_by_domain[domain]} parsed")
 
 
 @pdf_app.command("extract")

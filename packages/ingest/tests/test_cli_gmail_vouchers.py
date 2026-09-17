@@ -108,3 +108,42 @@ def test_fetch_vouchers_warns_and_counts_unrecognized_gyftr_brand(tmp_path, monk
     assert "unrecognized" in result.output.lower()
     assert "0 voucher record(s) found" in result.output
     assert not out_file.exists() or out_file.read_text().strip() == ""
+
+
+UNPARSEABLE_SWIGGY_BODY = """Your order is on its way!
+Order ID: 999888777
+"""  # missing Restaurant icon / Paid Via -- a real format variant we
+     # haven't matched, must still be counted as "seen" for this sender
+
+
+def test_fetch_vouchers_reports_per_sender_seen_vs_parsed_counts(tmp_path, monkeypatch):
+    # A parser silently returning None for a real Swiggy/Amazon Pay email
+    # (a format variant the regex doesn't match) is otherwise invisible --
+    # nothing distinguishes "no voucher mail from this sender" from
+    # "dozens of real emails from this sender that all failed to parse".
+    # The per-sender breakdown must surface that gap.
+    monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
+    fake_conn = MagicMock()
+    good_raw = _msg("Your order from Cafe Iftar", "Swiggy <noreply@swiggy.in>",
+                    "Wed, 28 Aug 2024 23:17:00 +0530",
+                    "ORDER JOURNEY\nRestaurant icon\nRestaurant icon\nCafe Iftar\n"
+                    "Order ID: 246907327135063\nPaid Via Credit/Debit card\t\tRs391")
+    bad_raw = _msg("Your order is on its way", "Swiggy <noreply@swiggy.in>",
+                   "Wed, 28 Aug 2024 20:00:00 +0530", UNPARSEABLE_SWIGGY_BODY)
+
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1", b"2"]), \
+         patch("munim_ingest.cli.getpass.getpass", return_value="fake-app-password"):
+        fake_conn.fetch.side_effect = [
+            ("OK", [(b"1 (RFC822 {123}", good_raw)]),
+            ("OK", [(b"2 (RFC822 {123}", bad_raw)]),
+        ]
+        out_file = tmp_path / "vouchers.jsonl"
+        result = runner.invoke(
+            app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
+                  "--out", str(out_file)])
+
+    assert result.exit_code == 0, result.output
+    assert "swiggy.in" in result.output
+    assert "2" in result.output  # 2 seen from swiggy.in
+    assert "1" in result.output  # 1 parsed from swiggy.in
