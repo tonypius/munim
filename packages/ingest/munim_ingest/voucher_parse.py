@@ -200,6 +200,36 @@ def parse_swiggy(raw_email: bytes) -> dict | None:
     }
 
 
+def parse_swiggy_dineout(raw_email: bytes) -> dict | None:
+    """Swiggy Dineout (in-restaurant dining payment) is a different
+    product from food delivery, with its own email format entirely --
+    no "Restaurant icon"/"BILL DETAILS"/"Paid Via" fields at all, so
+    parse_swiggy's patterns never match it (confirmed via a real dumped
+    email). No payment-method field exists here either, same as
+    Instamart -- paid_via is always None, relying on the bank
+    cross-check as the sole redemption signal."""
+    msg = email.message_from_bytes(raw_email)
+    if "swiggy.in" not in (msg["From"] or "").lower():
+        return None
+    text = _text_body(msg)
+    if "dineout" not in text.lower():
+        return None
+    order_id_match = re.search(r"Order ID:\s*(\d+)", text)
+    merchant_match = re.search(r"Paid to:\s*([^,\n]+)", text)
+    order_date_match = re.search(
+        r"Order Time and Date:\s*(\d{4}-\d{2}-\d{2})", text)
+    total_paid = _amount(text, "Total Paid")
+    if not (order_id_match and merchant_match and order_date_match) or total_paid is None:
+        return None
+    order_date = datetime.strptime(order_date_match.group(1), "%Y-%m-%d").date()
+    return {
+        "kind": "spend", "brand": "gyftr", "source": "swiggy_dineout",
+        "amount": total_paid, "merchant": merchant_match.group(1).strip(),
+        "order_id": order_id_match.group(1), "order_date": order_date,
+        "paid_via": None,
+    }
+
+
 def parse_instamart(raw_email: bytes) -> dict | None:
     msg = email.message_from_bytes(raw_email)
     if "instamart.in" not in (msg["From"] or "").lower():

@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from munim_ingest.voucher_parse import (
-    parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart,
+    parse_gyftr, parse_amazonpay, parse_swiggy, parse_swiggy_dineout, parse_instamart,
 )
 
 
@@ -320,6 +320,52 @@ def test_parse_swiggy_extracts_restaurant_amount_order_id_and_paid_via():
         "order_id": "246907327135063", "order_date": date(2024, 8, 28),
         "paid_via": "Credit/Debit card",
     }
+
+
+# Swiggy Dineout is a different product from food delivery -- an
+# in-restaurant dining payment, with its own email format entirely
+# (no "Restaurant icon"/"BILL DETAILS"/"Paid Via" fields at all).
+# Confirmed via a real dumped email (--dump-unparsed).
+SWIGGY_DINEOUT_BODY = """Greetings from Swiggy!
+
+Your Swiggy Dineout payment of INR 2614 at The Fisherman's Wharf is successful. Hope it was a smooth experience for you.
+
+Your payment summary
+
+Order ID: 218459839663083
+
+Order Time and Date: 2025-10-03 16:47:37
+
+Paid to: The Fisherman's Wharf, Krishnamurthy Puram, Mysore
+
+Here are the details of the payment:
+
+Bill Details			Amount
+Total Bill			₹2921
+DineCash			-₹137
+Total Paid			₹2614
+
+Disclaimer: This is an acknowledgment of the payment and not an invoice.
+"""
+
+
+def test_parse_swiggy_dineout_extracts_merchant_amount_and_order_id():
+    raw = _msg("Your Swiggy Dineout payment was successful",
+               "Swiggy Dineout <noreply@swiggy.in>",
+               "Fri, 3 Oct 2025 16:47:37 +0530", SWIGGY_DINEOUT_BODY)
+    record = parse_swiggy_dineout(raw)
+    assert record == {
+        "kind": "spend", "brand": "gyftr", "source": "swiggy_dineout",
+        "amount": 2614.0, "merchant": "The Fisherman's Wharf",
+        "order_id": "218459839663083", "order_date": date(2025, 10, 3),
+        "paid_via": None,
+    }
+
+
+def test_parse_swiggy_dineout_returns_none_for_a_regular_food_order():
+    raw = _msg("Your order from Cafe Iftar", "Swiggy <noreply@swiggy.in>",
+               "Wed, 28 Aug 2024 23:17:00 +0530", SWIGGY_BODY)
+    assert parse_swiggy_dineout(raw) is None
 
 
 INSTAMART_BODY = """Greetings from Instamart

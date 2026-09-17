@@ -99,12 +99,16 @@ def import_purchase(store: Store, record: dict) -> str:
 KNOWN_REAL_PAYMENT_RAILS = {"credit/debit card", "credit card", "debit card",
                             "upi", "netbanking"}
 
-# category is deterministic for these two sources -- Swiggy/Instamart
-# order emails don't carry enough merchant detail for the normal
-# classification pipeline to do better than guess. Amazon Pay's merchant
-# varies too widely for a fixed category, so it goes through Pipeline
-# instead (see import_spend).
-FIXED_CATEGORY_BY_SOURCE = {"swiggy_order": "Dining", "instamart_order": "Groceries"}
+# category is deterministic for these sources -- Swiggy/Dineout/
+# Instamart order emails don't carry enough merchant detail for the
+# normal classification pipeline to do better than guess. Amazon Pay's
+# merchant varies too widely for a fixed category, so it goes through
+# Pipeline instead (see import_spend).
+FIXED_CATEGORY_BY_SOURCE = {
+    "swiggy_order": "Dining",
+    "swiggy_dineout": "Dining",
+    "instamart_order": "Groceries",
+}
 
 # Date-window for deciding a spend record already has a matching real
 # bank transaction -- covers order-date vs. settlement-date lag.

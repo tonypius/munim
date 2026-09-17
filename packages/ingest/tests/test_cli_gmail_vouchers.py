@@ -172,19 +172,19 @@ def test_fetch_vouchers_dump_unparsed_saves_one_raw_email_per_domain(tmp_path, m
                   "--out", str(out_file), "--dump-unparsed", str(dump_dir)])
 
     assert result.exit_code == 0, result.output
-    dumped = dump_dir / "swiggy.in.eml"
+    dumped = dump_dir / "swiggy.in-order.eml"
     assert dumped.exists()
     assert dumped.read_bytes() == bad_raw
 
 
-def test_fetch_vouchers_dump_unparsed_only_saves_one_per_domain(tmp_path, monkeypatch):
+def test_fetch_vouchers_dump_unparsed_only_saves_one_per_domain_and_category(tmp_path, monkeypatch):
     monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
     fake_conn = MagicMock()
     first_bad = _msg("Your order is on its way", "Swiggy <noreply@swiggy.in>",
                      "Wed, 28 Aug 2024 20:00:00 +0530", UNPARSEABLE_SWIGGY_BODY)
     second_bad = _msg("Order update", "Swiggy <noreply@swiggy.in>",
                       "Wed, 28 Aug 2024 21:00:00 +0530",
-                      "A completely different unparseable body.")
+                      "A different order id: 111222333, still unparseable.")
 
     dump_dir = tmp_path / "dump"
     with patch("munim_ingest.cli.connect", return_value=fake_conn), \
@@ -198,5 +198,35 @@ def test_fetch_vouchers_dump_unparsed_only_saves_one_per_domain(tmp_path, monkey
         runner.invoke(app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
                             "--out", str(out_file), "--dump-unparsed", str(dump_dir)])
 
-    dumped = dump_dir / "swiggy.in.eml"
-    assert dumped.read_bytes() == first_bad  # not overwritten by the second
+    dumped = dump_dir / "swiggy.in-order.eml"
+    assert dumped.read_bytes() == first_bad  # not overwritten by the second, same category
+
+
+def test_fetch_vouchers_dump_unparsed_saves_distinct_categories_separately(tmp_path, monkeypatch):
+    # A food-delivery order and a Dineout order both fail to parse for
+    # different reasons -- both should be captured in one run, not just
+    # whichever comes first.
+    monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
+    fake_conn = MagicMock()
+    food_order_raw = _msg("Your order from Cafe X", "Swiggy <noreply@swiggy.in>",
+                          "Wed, 28 Aug 2024 20:00:00 +0530",
+                          "ORDER JOURNEY\nRestaurant icon\nRestaurant icon\nCafe X\n"
+                          "Order ID: 555\nsomething unmatched here")
+    dineout_raw = _msg("Your Swiggy Dineout payment", "Swiggy Dineout <noreply@swiggy.in>",
+                       "Wed, 28 Aug 2024 21:00:00 +0530",
+                       "Your Dineout payment. Order ID: 777\nsomething unmatched")
+
+    dump_dir = tmp_path / "dump"
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1", b"2"]), \
+         patch("munim_ingest.cli.getpass.getpass", return_value="fake-app-password"):
+        fake_conn.fetch.side_effect = [
+            ("OK", [(b"1 (RFC822 {123}", food_order_raw)]),
+            ("OK", [(b"2 (RFC822 {123}", dineout_raw)]),
+        ]
+        out_file = tmp_path / "vouchers.jsonl"
+        runner.invoke(app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
+                            "--out", str(out_file), "--dump-unparsed", str(dump_dir)])
+
+    assert (dump_dir / "swiggy.in-food-delivery-order.eml").read_bytes() == food_order_raw
+    assert (dump_dir / "swiggy.in-dineout.eml").read_bytes() == dineout_raw

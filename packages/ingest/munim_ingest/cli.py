@@ -28,7 +28,9 @@ from .pdf_extract import (
     PdfPasswordError, extract_all_text, extract_rows, filter_transaction_rows, open_pdf,
 )
 from .voucher_packs import GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FROM
-from .voucher_parse import parse_gyftr, parse_amazonpay, parse_swiggy, parse_instamart
+from .voucher_parse import (
+    parse_gyftr, parse_amazonpay, parse_swiggy, parse_swiggy_dineout, parse_instamart,
+)
 
 def _is_hdfc_v2_layout(rows):
     """The newer HDFC template (a card-number upgrade on the same
@@ -279,7 +281,7 @@ _VOUCHER_SEARCH_DOMAINS = [GYFTR_FROM, AMAZONPAY_FROM, SWIGGY_FROM, INSTAMART_FR
 # GYFTR isn't in this list -- it's dispatched separately, since
 # parse_gyftr returns (records, unrecognized) for a possibly-multi-item
 # email rather than the single dict-or-None every other sender returns.
-_SINGLE_RECORD_PARSERS = [parse_amazonpay, parse_swiggy, parse_instamart]
+_SINGLE_RECORD_PARSERS = [parse_amazonpay, parse_swiggy, parse_swiggy_dineout, parse_instamart]
 
 
 def _sender_domain(raw_email: bytes) -> str | None:
@@ -404,18 +406,30 @@ def gmail_fetch_vouchers(
                 if domain is not None and parsed_this_message:
                     parsed_by_domain[domain] += 1
                 elif domain is not None and dump_unparsed is not None:
-                    dest = dump_unparsed / f"{domain}.eml"
-                    # Most inboxes have far more marketing mail than
-                    # real orders from these senders -- dumping the
-                    # literal first unparsed message tends to catch a
-                    # promo email (which correctly parses to nothing),
-                    # not a genuine order that's failing. This heuristic
-                    # targets messages that look like a real transaction.
-                    looks_like_a_real_order = (
-                        b"order id" in raw.lower() or b"was paid on" in raw.lower())
-                    if not dest.exists() and looks_like_a_real_order:
-                        dump_unparsed.mkdir(parents=True, exist_ok=True)
-                        dest.write_bytes(raw)
+                    # Most inboxes have far more marketing mail than real
+                    # orders from these senders -- dumping only the
+                    # literal first unparsed message per domain tends to
+                    # catch a promo email (which correctly parses to
+                    # nothing) and nothing else. Bucketing by a rough
+                    # content category, one file per (domain, category),
+                    # catches multiple distinct real failure modes (e.g.
+                    # a regular food-delivery order AND a Dineout order)
+                    # in a single fetch instead of needing another round
+                    # trip per category.
+                    lowered = raw.lower()
+                    if b"restaurant icon" in lowered:
+                        category = "food-delivery-order"
+                    elif b"dineout" in lowered:
+                        category = "dineout"
+                    elif b"order id" in lowered or b"was paid on" in lowered:
+                        category = "order"
+                    else:
+                        category = None  # likely marketing/promo -- skip
+                    if category is not None:
+                        dest = dump_unparsed / f"{domain}-{category}.eml"
+                        if not dest.exists():
+                            dump_unparsed.mkdir(parents=True, exist_ok=True)
+                            dest.write_bytes(raw)
             except Exception as e:
                 consecutive_failures += 1
                 console.print(
