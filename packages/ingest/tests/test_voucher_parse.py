@@ -243,6 +243,34 @@ def test_parse_amazonpay_extracts_amount_merchant_order_id_and_date():
     }
 
 
+def test_parse_amazonpay_handles_rfc2047_encoded_rupee_symbol_subject():
+    # Confirmed via a real dumped email (--dump-unparsed): the subject
+    # is "=?UTF-8?Q?=E2=82=B9199.00_was_paid_on_Amazon.in?=" -- Python's
+    # email serialization RFC2047-encodes a non-ASCII Subject the same
+    # way automatically, so setting the literal ₹ character here
+    # reproduces the real on-the-wire form. msg["Subject"] previously
+    # returned this raw encoded-word string verbatim (never decoded),
+    # and the regex only ever accepted the literal "Rs" prefix anyway.
+    raw = _msg("₹199.00 was paid on Amazon.in",
+               "Amazon Pay India <no-reply@amazonpay.in>",
+               "Tue, 1 Sep 2026 00:15:00 +0530", AMAZONPAY_BODY)
+    record = parse_amazonpay(raw)
+    assert record["amount"] == 199.0
+    assert record["merchant"] == "Amazon.in"
+
+
+def test_parse_amazonpay_handles_abbreviated_month_in_order_date():
+    # Confirmed via a real dumped email: some Order Date fields use an
+    # abbreviated month ("23 Nov 2025"), not always the full name
+    # ("01 September 2026") the original sample happened to use.
+    body = AMAZONPAY_BODY.replace("01 September 2026", "23 Nov 2025")
+    raw = _msg("Rs 199.00 was paid on Amazon.in",
+               "Amazon Pay India <no-reply@amazonpay.in>",
+               "Sun, 23 Nov 2025 00:15:00 +0530", body)
+    record = parse_amazonpay(raw)
+    assert record["order_date"] == date(2025, 11, 23)
+
+
 # A real fetched Amazon Pay email (confirmed via --dump-unparsed): the
 # text/plain alternative is a short stub with none of the order detail,
 # and the actual Order ID/Order Date/amount live only in the HTML

@@ -12,6 +12,7 @@ by sender first.
 from __future__ import annotations
 
 import email
+import email.header as header_lib
 import html as html_lib
 import re
 from datetime import date, datetime
@@ -156,9 +157,14 @@ def parse_amazonpay(raw_email: bytes) -> dict | None:
     msg = email.message_from_bytes(raw_email)
     if "amazonpay.in" not in (msg["From"] or "").lower():
         return None
-    subject = msg["Subject"] or ""
+    # A non-ASCII Subject (confirmed: some real ones use the literal ₹
+    # symbol instead of "Rs") is RFC2047-encoded on the wire --
+    # msg["Subject"] returns that raw encoded-word string verbatim, not
+    # the decoded text, so it must be decoded before matching.
+    raw_subject = msg["Subject"] or ""
+    subject = str(header_lib.make_header(header_lib.decode_header(raw_subject)))
     subj_match = re.match(
-        r"Rs\s*([\d,]+(?:\.\d+)?)\s+was paid on\s+(.+)", subject.strip())
+        r"(?:Rs\.?|₹)\s*([\d,]+(?:\.\d+)?)\s+was paid on\s+(.+)", subject.strip())
     if not subj_match:
         return None
     text = _text_body(msg)
@@ -167,8 +173,19 @@ def parse_amazonpay(raw_email: bytes) -> dict | None:
         r"Order Date\s*\n?\s*\t?\s*(\d{1,2} \w+ \d{4})", text)
     if not order_id_match or not order_date_match:
         return None
-    order_date = datetime.strptime(
-        order_date_match.group(1), "%d %B %Y").date()
+    order_date_text = order_date_match.group(1)
+    # Confirmed via real emails: the month can be spelled out in full
+    # ("01 September 2026") or abbreviated ("23 Nov 2025") -- try both
+    # rather than assume one.
+    order_date = None
+    for fmt in ("%d %B %Y", "%d %b %Y"):
+        try:
+            order_date = datetime.strptime(order_date_text, fmt).date()
+            break
+        except ValueError:
+            continue
+    if order_date is None:
+        return None
     return {
         "kind": "spend", "brand": "gyftr", "source": "amazonpay",
         "amount": float(subj_match.group(1).replace(",", "")),
