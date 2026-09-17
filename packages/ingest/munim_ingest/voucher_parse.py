@@ -184,8 +184,12 @@ def parse_swiggy(raw_email: bytes) -> dict | None:
         return None
     text = _text_body(msg)
     order_id_match = re.search(r"Order ID:\s*(\d+)", text)
-    restaurant_match = re.search(
-        r"Restaurant icon\s*\n\s*Restaurant icon\s*\n+([^\n]+)", text)
+    # The restaurant name is the first non-blank line right after the
+    # "ORDER JOURNEY" heading -- confirmed against a real fetched order
+    # email (via --dump-unparsed), which has no "Restaurant icon" alt
+    # text at all (an earlier version of this regex assumed that shape
+    # from a hand-copied sample; it never matched real raw source).
+    restaurant_match = re.search(r"ORDER JOURNEY\s*\n+([^\n]+)", text)
     paid_via_match = re.search(
         r"Paid Via\s+([^\t\n₹]+?)\s*\t*\s*(?:Rs|₹)?\s*([\d,]+(?:\.\d+)?)", text)
     order_date = _header_date(msg)
@@ -232,7 +236,15 @@ def parse_swiggy_dineout(raw_email: bytes) -> dict | None:
 
 def parse_instamart(raw_email: bytes) -> dict | None:
     msg = email.message_from_bytes(raw_email)
-    if "instamart.in" not in (msg["From"] or "").lower():
+    from_header = (msg["From"] or "").lower()
+    # Confirmed via a real dumped email: some Instamart order
+    # confirmations arrive from noreply@swiggy.in, not instamart.in --
+    # the order_id + Grand Total content check below is what actually
+    # gates a real match, not the sender alone, so accepting both
+    # domains here doesn't risk false-matching an unrelated swiggy.in
+    # email (parse_swiggy/parse_swiggy_dineout already run first and
+    # would have claimed anything shaped like their own template).
+    if "instamart.in" not in from_header and "swiggy.in" not in from_header:
         return None
     text = _text_body(msg)
     order_id_match = re.search(r"order id:\s*(\d+)", text, re.I)

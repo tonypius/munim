@@ -297,8 +297,6 @@ SWIGGY_BODY = """Order summary banner
 Delivery in 25 mins!
 Rs192 saved on this order
 ORDER JOURNEY
-Restaurant icon
-Restaurant icon
 Cafe Iftar
 No.58/8A Jnr Complex Ground Floor Gubbi Cross Kothanur Post, Bangalore
 Aug 28, 10:52 PM
@@ -319,6 +317,41 @@ def test_parse_swiggy_extracts_restaurant_amount_order_id_and_paid_via():
         "amount": 391.0, "merchant": "Cafe Iftar",
         "order_id": "246907327135063", "order_date": date(2024, 8, 28),
         "paid_via": "Credit/Debit card",
+    }
+
+
+# Confirmed via a real dumped order email (--dump-unparsed): no
+# "Restaurant icon" alt text anywhere in the raw source (that shape was
+# an artifact of an earlier hand-copied sample, not real HTML), heavy
+# \r\n + deep-indentation whitespace between fields (typical of
+# quoted-printable HTML-to-text stripping), and a large whitespace gap
+# between "Paid Via X" and its amount on the next visual line.
+REAL_SWIGGY_ORDER_BODY = (
+    "\xa0\r\n\r\n\xa0\r\n\r\nORDER JOURNEY\r\n\r\n"
+    "                                                            \r\n\r\n"
+    "Test Juice Bar\r\n\r\n"
+    "1/1, Example Main Rd, Sample Layout, Example City 560001\r\n\r\n"
+    "Mar 25, 9:37 PM\r\n\r\nTest Customer\r\n\r\n"
+    "Flat 100, Example Rd, Sample Layout, Example City\r\n\r\n"
+    "Mar 25, 9:55 PM\r\nOrder ID: \r\n233424426648204\r\n\r\nBILL DETAILS\r\n\r\n"
+    "Mango Thick Shake x1\r\n\t\t₹97\r\n\r\n"
+    "Paid Via Swiggy Money\r\n\r\n"
+    "                                                            \r\n\r\n"
+    "                                                            \r\n\r\n"
+    "₹328.00\r\n\r\nDisclaimer: not an invoice.\r\n"
+)
+
+
+def test_parse_swiggy_handles_real_fetched_email_shape():
+    raw = _msg("Your Swiggy order was delivered on time",
+               "Swiggy <noreply@swiggy.in>",
+               "Tue, 25 Mar 2025 21:55:00 +0530", REAL_SWIGGY_ORDER_BODY)
+    record = parse_swiggy(raw)
+    assert record == {
+        "kind": "spend", "brand": "gyftr", "source": "swiggy_order",
+        "amount": 328.0, "merchant": "Test Juice Bar",
+        "order_id": "233424426648204", "order_date": date(2025, 3, 25),
+        "paid_via": "Swiggy Money",
     }
 
 
@@ -391,6 +424,18 @@ def test_parse_instamart_extracts_amount_order_id_and_no_paid_via():
         "order_id": "248336149154232", "order_date": date(2026, 9, 14),
         "paid_via": None,
     }
+
+
+def test_parse_instamart_also_matches_when_sent_from_swiggy_domain():
+    # Confirmed via a real dumped email (--dump-unparsed): some
+    # Instamart order confirmations arrive from noreply@swiggy.in, not
+    # instamart.in -- the sender check must not reject those.
+    raw = _msg("Your Instamart order was successfully delivered",
+               "noreply@swiggy.in", "Mon, 14 Sep 2026 12:09:00 +0530",
+               INSTAMART_BODY)
+    record = parse_instamart(raw)
+    assert record["order_id"] == "248336149154232"
+    assert record["amount"] == 395.0
 
 
 def test_parsers_return_none_for_unrelated_email():
