@@ -20,11 +20,11 @@ def test_sender_domains_are_bare_domains():
 
 
 def test_brand_for_gyftr_product_recognizes_swiggy_money_voucher():
-    assert brand_for_gyftr_product("Swiggy Money Voucher") == "swiggy"
+    assert brand_for_gyftr_product("Swiggy Money Voucher") == "gyftr"
 
 
 def test_brand_for_gyftr_product_is_case_insensitive():
-    assert brand_for_gyftr_product("SWIGGY MONEY VOUCHER") == "swiggy"
+    assert brand_for_gyftr_product("SWIGGY MONEY VOUCHER") == "gyftr"
 
 
 def test_brand_for_gyftr_product_returns_none_for_unknown_brand():
@@ -32,17 +32,18 @@ def test_brand_for_gyftr_product_returns_none_for_unknown_brand():
 
 
 def test_brand_for_gyftr_product_recognizes_amazon_variants():
-    assert brand_for_gyftr_product("Amazon") == "amazonpay"
-    assert brand_for_gyftr_product("Amazon Shopping Voucher") == "amazonpay"
+    assert brand_for_gyftr_product("Amazon") == "gyftr"
+    assert brand_for_gyftr_product("Amazon Shopping Voucher") == "gyftr"
 
 
 def test_brand_for_gyftr_product_recognizes_swiggy_instamart():
-    assert brand_for_gyftr_product("Swiggy Instamart") == "swiggy"
+    assert brand_for_gyftr_product("Swiggy Instamart") == "gyftr"
 
 
-def test_brand_for_gyftr_product_routes_single_use_brands_to_catchall_gyftr_wallet():
-    # No redemption-email parser exists for any of these -- they share
-    # one generic wallet rather than each getting its own account.
+def test_brand_for_gyftr_product_recognizes_other_known_brands():
+    # Every recognized GYFTR brand shares one wallet account -- the
+    # user treats all of these as "GYFTR coupons" with a single
+    # combined balance/spend view.
     assert brand_for_gyftr_product("LENSKART") == "gyftr"
     assert brand_for_gyftr_product("Bata") == "gyftr"
     assert brand_for_gyftr_product("Zepto") == "gyftr"

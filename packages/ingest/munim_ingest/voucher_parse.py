@@ -154,7 +154,7 @@ def parse_amazonpay(raw_email: bytes) -> dict | None:
     order_date = datetime.strptime(
         order_date_match.group(1), "%d %B %Y").date()
     return {
-        "kind": "spend", "brand": "amazonpay", "source": "amazonpay",
+        "kind": "spend", "brand": "gyftr", "source": "amazonpay",
         "amount": float(subj_match.group(1).replace(",", "")),
         "merchant": subj_match.group(2).strip(),
         "order_id": order_id_match.group(1), "order_date": order_date,
@@ -176,7 +176,7 @@ def parse_swiggy(raw_email: bytes) -> dict | None:
     if not (order_id_match and restaurant_match and paid_via_match) or order_date is None:
         return None
     return {
-        "kind": "spend", "brand": "swiggy", "source": "swiggy_order",
+        "kind": "spend", "brand": "gyftr", "source": "swiggy_order",
         "amount": float(paid_via_match.group(2).replace(",", "")),
         "merchant": restaurant_match.group(1).strip(),
         "order_id": order_id_match.group(1), "order_date": order_date,
@@ -195,7 +195,7 @@ def parse_instamart(raw_email: bytes) -> dict | None:
     if not order_id_match or grand_total is None or order_date is None:
         return None
     return {
-        "kind": "spend", "brand": "swiggy", "source": "instamart_order",
+        "kind": "spend", "brand": "gyftr", "source": "instamart_order",
         "amount": grand_total, "merchant": "Instamart",
         "order_id": order_id_match.group(1), "order_date": order_date,
         "paid_via": None,

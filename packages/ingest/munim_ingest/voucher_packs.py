@@ -16,21 +16,20 @@ INSTAMART_FROM = "instamart.in"
 # unconfirmed -- rather than guess a slug from free text, add one line
 # here the first time a new brand's real wording is seen. Keys are
 # matched case-insensitively as a substring of the email body.
+# Every recognized brand shares one wallet account -- the user treats
+# all of these as "GYFTR coupons" and wants a single running balance/
+# spend view regardless of which specific product line funded it (e.g.
+# an Amazon Pay balance voucher gets spent on Uber, Zomato District, and
+# plenty of things that have nothing to do with Amazon). Redemption
+# CATEGORY (Dining vs Groceries vs Pipeline-classified) is decided
+# independently by each spend record's "source" field in voucher_wallet
+# import_spend -- merging every brand into one account here has no
+# effect on that classification, only on which account holds the money.
 GYFTR_BRAND_MAP: dict[str, str] = {
-    # These two have real, working redemption-email tracking of their
-    # own (Swiggy/Instamart order emails; Amazon Pay spend emails), so
-    # each keeps its own wallet account rather than joining the
-    # catch-all below -- consolidating them would mean either losing
-    # that tracking or redirecting it to a different account.
-    "swiggy money voucher": "swiggy",
-    "swiggy instamart": "swiggy",
-    "amazon shopping voucher": "amazonpay",
-    "amazon": "amazonpay",
-    # Everything else is a single-use, store-specific voucher with no
-    # redemption-email parser built (no sample email seen yet for any
-    # of these) -- rather than a proliferation of never-redeemed
-    # per-brand accounts, they share one generic GYFTR wallet until a
-    # real redemption source is found for a given brand.
+    "swiggy money voucher": "gyftr",
+    "swiggy instamart": "gyftr",
+    "amazon shopping voucher": "gyftr",
+    "amazon": "gyftr",
     "lenskart": "gyftr",
     "bata": "gyftr",
     "zepto": "gyftr",

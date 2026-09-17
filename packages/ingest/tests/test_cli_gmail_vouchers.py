@@ -56,7 +56,7 @@ def test_fetch_vouchers_writes_jsonl_records(tmp_path, monkeypatch):
     assert len(lines) == 1
     record = json.loads(lines[0])
     assert record["kind"] == "purchase"
-    assert record["brand"] == "swiggy"
+    assert record["brand"] == "gyftr"
     assert record["value"] == 2000.0
     assert record["purchased_at"] == "2026-09-14"
 
