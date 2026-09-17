@@ -47,6 +47,19 @@ def _ensure_voucher_account(store: Store, brand: str, opening_date: date) -> str
     if account not in opening_balances:
         opening_balances[account] = {"balance": 0.0, "as_of": opening_date.isoformat()}
         store.set_config("account_opening_balances", opening_balances)
+    elif opening_balances[account]["balance"] == 0.0:
+        # A later fetch/import round can discover a real transaction
+        # dated before whatever record happened to be imported first
+        # (e.g. a parser fix surfaces older mail) -- if the anchor date
+        # stayed fixed, that earlier transaction would silently fall
+        # outside compute_account_balance's window. Only ever moves the
+        # anchor earlier, and only while the balance is still the
+        # auto-created 0.0 sentinel -- a real non-zero manually-set
+        # opening balance is never touched.
+        existing_as_of = opening_balances[account]["as_of"]
+        if opening_date.isoformat() < existing_as_of:
+            opening_balances[account]["as_of"] = opening_date.isoformat()
+            store.set_config("account_opening_balances", opening_balances)
 
     return account
 

@@ -72,6 +72,29 @@ def test_import_purchase_does_not_overwrite_existing_opening_balance(tmp_path):
     assert balances["voucher-swiggy"] == {"balance": 500.0, "as_of": "2026-01-01"}
 
 
+def test_import_purchase_moves_zero_balance_anchor_earlier_for_an_earlier_record(tmp_path):
+    # A later fetch/import round can discover a real transaction dated
+    # BEFORE whatever record happened to be imported first (e.g. a
+    # parser bug fixed after the fact surfaces older mail) -- if the
+    # opening-balance anchor stays fixed at the first-ever date, every
+    # earlier real transaction silently falls outside
+    # compute_account_balance's window and the reported balance is
+    # wrong by exactly that much. Only ever moves EARLIER, and only
+    # when the tracked balance is still the auto-created 0.0 sentinel
+    # (a real non-zero manually-set balance, per the test above, must
+    # never be touched).
+    store = Store(home=tmp_path)
+    store.set_config("account_opening_balances",
+                      {"voucher-swiggy": {"balance": 0.0, "as_of": "2026-09-14"}})
+    earlier_record = {**PURCHASE_RECORD, "code": "EARLIER-CODE",
+                      "purchased_at": date(2025, 4, 1)}
+
+    import_purchase(store, earlier_record)
+
+    balances = store.get_config("account_opening_balances", {})
+    assert balances["voucher-swiggy"] == {"balance": 0.0, "as_of": "2025-04-01"}
+
+
 def test_import_purchase_links_to_unique_matching_card_debit(tmp_path):
     store = Store(home=tmp_path)
     store.upsert_transactions([_card_debit("card1", 2000.0, "2026-09-14")])
