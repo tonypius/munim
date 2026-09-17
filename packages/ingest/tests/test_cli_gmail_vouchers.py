@@ -147,3 +147,56 @@ def test_fetch_vouchers_reports_per_sender_seen_vs_parsed_counts(tmp_path, monke
     assert "swiggy.in" in result.output
     assert "2" in result.output  # 2 seen from swiggy.in
     assert "1" in result.output  # 1 parsed from swiggy.in
+
+
+def test_fetch_vouchers_dump_unparsed_saves_one_raw_email_per_domain(tmp_path, monkeypatch):
+    # When a real fetched email fails to parse, the copy-paste a user can
+    # give back is what their mail client RENDERS, not the raw MIME
+    # source the parser actually sees (HTML entities, tag structure,
+    # multipart layout) -- --dump-unparsed saves the actual raw bytes
+    # locally so the real structure can be inspected directly, instead
+    # of relying on a human transcription of it.
+    monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
+    fake_conn = MagicMock()
+    bad_raw = _msg("Your order is on its way", "Swiggy <noreply@swiggy.in>",
+                   "Wed, 28 Aug 2024 20:00:00 +0530", UNPARSEABLE_SWIGGY_BODY)
+
+    dump_dir = tmp_path / "dump"
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1"]), \
+         patch("munim_ingest.cli.getpass.getpass", return_value="fake-app-password"):
+        fake_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", bad_raw)])
+        out_file = tmp_path / "vouchers.jsonl"
+        result = runner.invoke(
+            app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
+                  "--out", str(out_file), "--dump-unparsed", str(dump_dir)])
+
+    assert result.exit_code == 0, result.output
+    dumped = dump_dir / "swiggy.in.eml"
+    assert dumped.exists()
+    assert dumped.read_bytes() == bad_raw
+
+
+def test_fetch_vouchers_dump_unparsed_only_saves_one_per_domain(tmp_path, monkeypatch):
+    monkeypatch.delenv("MUNIM_GMAIL_APP_PASSWORD", raising=False)
+    fake_conn = MagicMock()
+    first_bad = _msg("Your order is on its way", "Swiggy <noreply@swiggy.in>",
+                     "Wed, 28 Aug 2024 20:00:00 +0530", UNPARSEABLE_SWIGGY_BODY)
+    second_bad = _msg("Order update", "Swiggy <noreply@swiggy.in>",
+                      "Wed, 28 Aug 2024 21:00:00 +0530",
+                      "A completely different unparseable body.")
+
+    dump_dir = tmp_path / "dump"
+    with patch("munim_ingest.cli.connect", return_value=fake_conn), \
+         patch("munim_ingest.cli.search_uids", return_value=[b"1", b"2"]), \
+         patch("munim_ingest.cli.getpass.getpass", return_value="fake-app-password"):
+        fake_conn.fetch.side_effect = [
+            ("OK", [(b"1 (RFC822 {123}", first_bad)]),
+            ("OK", [(b"2 (RFC822 {123}", second_bad)]),
+        ]
+        out_file = tmp_path / "vouchers.jsonl"
+        runner.invoke(app, ["gmail", "fetch-vouchers", "--email", "me@example.com",
+                            "--out", str(out_file), "--dump-unparsed", str(dump_dir)])
+
+    dumped = dump_dir / "swiggy.in.eml"
+    assert dumped.read_bytes() == first_bad  # not overwritten by the second

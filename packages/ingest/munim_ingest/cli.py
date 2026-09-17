@@ -316,6 +316,13 @@ def gmail_fetch_vouchers(
     since: str = typer.Option(
         None, "--since",
         help="Only messages on/after this date (YYYY-MM-DD)."),
+    dump_unparsed: Path = typer.Option(
+        None, "--dump-unparsed",
+        help="Save the raw .eml of the first seen-but-unparsed message "
+             "per sender domain into this directory, for diagnosing a "
+             "parser gap -- a copy-pasted email body is what a mail "
+             "client RENDERS, not the raw MIME/HTML the parser actually "
+             "sees, so this captures the real thing directly."),
 ):
     """Search Gmail for GYFTR/Amazon Pay/Swiggy/Instamart emails and
     write one parsed voucher record per line to a JSONL file for
@@ -396,6 +403,11 @@ def gmail_fetch_vouchers(
 
                 if domain is not None and parsed_this_message:
                     parsed_by_domain[domain] += 1
+                elif domain is not None and dump_unparsed is not None:
+                    dest = dump_unparsed / f"{domain}.eml"
+                    if not dest.exists():
+                        dump_unparsed.mkdir(parents=True, exist_ok=True)
+                        dest.write_bytes(raw)
             except Exception as e:
                 consecutive_failures += 1
                 console.print(
