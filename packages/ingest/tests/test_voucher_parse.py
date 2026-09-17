@@ -107,9 +107,9 @@ def test_parse_gyftr_extracts_every_voucher_from_a_multi_item_email():
                "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_MULTI_ZEPTO_BODY)
     records, unrecognized = parse_gyftr(raw)
     assert records == [
-        {"kind": "purchase", "brand": "zepto", "value": 1000.0,
+        {"kind": "purchase", "brand": "gyftr", "value": 1000.0,
          "code": "6009750167418156", "purchased_at": date(2026, 9, 14)},
-        {"kind": "purchase", "brand": "zepto", "value": 1000.0,
+        {"kind": "purchase", "brand": "gyftr", "value": 1000.0,
          "code": "6009750167153158", "purchased_at": date(2026, 9, 14)},
     ]
     assert unrecognized == []
@@ -199,7 +199,7 @@ def test_parse_gyftr_reports_both_recognized_and_unrecognized_from_one_email():
                "Mon, 14 Sep 2026 14:09:00 +0530", GYFTR_MIXED_RECOGNIZED_UNRECOGNIZED_BODY)
     records, unrecognized = parse_gyftr(raw)
     assert records == [{
-        "kind": "purchase", "brand": "zepto", "value": 2000.0,
+        "kind": "purchase", "brand": "gyftr", "value": 2000.0,
         "code": "6009750167588875", "purchased_at": date(2026, 9, 14),
     }]
     assert unrecognized == ["Croma"]

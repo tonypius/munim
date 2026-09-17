@@ -17,15 +17,25 @@ INSTAMART_FROM = "instamart.in"
 # here the first time a new brand's real wording is seen. Keys are
 # matched case-insensitively as a substring of the email body.
 GYFTR_BRAND_MAP: dict[str, str] = {
+    # These two have real, working redemption-email tracking of their
+    # own (Swiggy/Instamart order emails; Amazon Pay spend emails), so
+    # each keeps its own wallet account rather than joining the
+    # catch-all below -- consolidating them would mean either losing
+    # that tracking or redirecting it to a different account.
     "swiggy money voucher": "swiggy",
     "swiggy instamart": "swiggy",
     "amazon shopping voucher": "amazonpay",
     "amazon": "amazonpay",
-    "lenskart": "lenskart",
-    "bata": "bata",
-    "zepto": "zepto",
-    "westside": "westside",
-    "max": "max",
+    # Everything else is a single-use, store-specific voucher with no
+    # redemption-email parser built (no sample email seen yet for any
+    # of these) -- rather than a proliferation of never-redeemed
+    # per-brand accounts, they share one generic GYFTR wallet until a
+    # real redemption source is found for a given brand.
+    "lenskart": "gyftr",
+    "bata": "gyftr",
+    "zepto": "gyftr",
+    "westside": "gyftr",
+    "max": "gyftr",
 }
 
 

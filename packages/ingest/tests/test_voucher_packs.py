@@ -40,9 +40,11 @@ def test_brand_for_gyftr_product_recognizes_swiggy_instamart():
     assert brand_for_gyftr_product("Swiggy Instamart") == "swiggy"
 
 
-def test_brand_for_gyftr_product_recognizes_other_known_brands():
-    assert brand_for_gyftr_product("LENSKART") == "lenskart"
-    assert brand_for_gyftr_product("Bata") == "bata"
-    assert brand_for_gyftr_product("Zepto") == "zepto"
-    assert brand_for_gyftr_product("Westside") == "westside"
-    assert brand_for_gyftr_product("MAX") == "max"
+def test_brand_for_gyftr_product_routes_single_use_brands_to_catchall_gyftr_wallet():
+    # No redemption-email parser exists for any of these -- they share
+    # one generic wallet rather than each getting its own account.
+    assert brand_for_gyftr_product("LENSKART") == "gyftr"
+    assert brand_for_gyftr_product("Bata") == "gyftr"
+    assert brand_for_gyftr_product("Zepto") == "gyftr"
+    assert brand_for_gyftr_product("Westside") == "gyftr"
+    assert brand_for_gyftr_product("MAX") == "gyftr"
